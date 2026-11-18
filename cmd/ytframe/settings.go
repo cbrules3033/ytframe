@@ -11,22 +11,29 @@ import (
 	"time"
 )
 
-const appVersion = "1.0.0"
+const appVersion = "1.1.0"
 
 type Settings struct {
-	LastURL   string `json:"last_url"`
-	X         int32  `json:"x"`
-	Y         int32  `json:"y"`
-	Width     int32  `json:"width"`
-	Height    int32  `json:"height"`
-	HasRect   bool   `json:"has_rect"`
-	Volume    int    `json:"volume"`
-	Ontop     bool   `json:"ontop"`
-	ExtraArgs string `json:"extra_args,omitempty"`
+	LastURL      string `json:"last_url"`
+	X            int32  `json:"x"`
+	Y            int32  `json:"y"`
+	Width        int32  `json:"width"`
+	Height       int32  `json:"height"`
+	HasRect      bool   `json:"has_rect"`
+	Volume       int    `json:"volume"`
+	Ontop        bool   `json:"ontop"`
+	Resume       bool   `json:"resume"`
+	Quality      string `json:"quality"`
+	SponsorBlock bool   `json:"sponsor_block"`
+	Controls     bool   `json:"controls"`
+	ExtraArgs    string `json:"extra_args,omitempty"`
 }
 
 func defaultSettings() Settings {
-	return Settings{Width: 960, Height: 540, Volume: 100}
+	return Settings{
+		Width: 960, Height: 540, Volume: 100,
+		Resume: true, Quality: "best", SponsorBlock: true, Controls: true,
+	}
 }
 
 var (
@@ -68,6 +75,11 @@ func loadSettings() Settings {
 	}
 	if s.Volume < 0 || s.Volume > 130 {
 		s.Volume = 100
+	}
+	switch s.Quality {
+	case "best", "1080", "720", "480":
+	default:
+		s.Quality = "best"
 	}
 	return s
 }

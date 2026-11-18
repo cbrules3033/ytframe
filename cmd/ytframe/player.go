@@ -33,6 +33,11 @@ type Player struct {
 	dwidth, dheight int
 	duration        float64
 	hasDuration     bool
+	pos             float64
+	seeking         bool
+	title           string
+	playlistCount   int
+	playlistPos     int
 	pause           bool
 	fullscreen      bool
 	ontop           bool
@@ -70,9 +75,9 @@ func (p *Player) start(url string, startSec int) error {
 	args := []string{
 		"--no-config",
 		"--no-border",
-		"--no-osc",
 		"--no-osd-bar",
-		"--osd-level=0",
+		"--osd-level=1",
+		"--osd-duration=1000",
 		"--no-terminal",
 		"--force-window=immediate",
 		"--keep-open=yes",
@@ -86,8 +91,39 @@ func (p *Player) start(url string, startSec int) error {
 		fmt.Sprintf("--volume=%d", p.volume),
 		"--log-file=" + filepath.Join(dataDirPath, "mpv.log"),
 		"--input-conf=" + filepath.Join(dataDirPath, "input.conf"),
-		"--script-opts=ytdl_hook-ytdl_path=" + ytdlpPath,
 		"--msg-level=all=warn",
+	}
+
+	oscVisibility := "auto"
+	if !p.app.settings.Controls {
+		oscVisibility = "never"
+	}
+	scriptOpts := []string{
+		"ytdl_hook-ytdl_path=" + ytdlpPath,
+		"osc-layout=bottombar",
+		"osc-visibility=" + oscVisibility,
+		"osc-hidetimeout=1200",
+		"osc-fadeduration=150",
+		"osc-fadein=yes",
+		"osc-barmargin=8",
+		"osc-deadzonesize=0.6",
+		"osc-windowcontrols=no",
+		"osc-idlescreen=no",
+		"osc-title=",
+		"osc-icon_style=fluent",
+		"osc-timetotal=yes",
+		"osc-seekbarstyle=bar",
+		"osc-greenandgrumpy=yes",
+		"osc-background_color=#101114",
+		"osc-buttons_color=#F2F3F5",
+		"osc-timecode_color=#9AA0A6",
+		"osc-time_pos_color=#F2F3F5",
+		"osc-time_pos_outline_color=#101114",
+		"osc-held_element_color=#3EA6FF",
+	}
+	args = append(args, "--script-opts="+strings.Join(scriptOpts, ","))
+	if q := qualityFormat(p.app.settings.Quality); q != "" {
+		args = append(args, "--ytdl-format="+q)
 	}
 	if p.app.settings.Ontop {
 		args = append(args, "--ontop=yes")
@@ -111,6 +147,11 @@ func (p *Player) start(url string, startSec int) error {
 	p.cmd = cmd
 	p.running = true
 	p.url = url
+	p.pos = 0
+	p.seeking = false
+	p.title = ""
+	p.playlistCount = 0
+	p.playlistPos = 0
 	p.loadNotified = false
 	p.endReason = ""
 	p.endError = ""
@@ -163,6 +204,7 @@ func (p *Player) observeAll() {
 	props := []string{
 		"dwidth", "dheight", "duration", "pause", "fullscreen", "ontop",
 		"volume", "mute", "eof-reached", "path", "media-title", "idle-active",
+		"time-pos", "seeking", "playlist-count", "playlist-pos",
 	}
 	for i, name := range props {
 		p.command("observe_property", i+1, name)
@@ -238,6 +280,28 @@ func (p *Player) applyProperty(name string, raw json.RawMessage) {
 		} else if f, ok := num(); ok {
 			p.hasDuration = true
 			p.duration = f
+		}
+	case "time-pos":
+		if v == nil {
+			p.pos = 0
+		} else if f, ok := num(); ok {
+			p.pos = f
+		}
+	case "seeking":
+		if b, ok := v.(bool); ok {
+			p.seeking = b
+		}
+	case "media-title":
+		if s, ok := v.(string); ok {
+			p.title = s
+		}
+	case "playlist-count":
+		if f, ok := num(); ok {
+			p.playlistCount = int(f)
+		}
+	case "playlist-pos":
+		if f, ok := num(); ok {
+			p.playlistPos = int(f)
 		}
 	case "pause":
 		if b, ok := v.(bool); ok {
@@ -325,6 +389,9 @@ func (p *Player) load(url string, startSec int) {
 	p.endReason = ""
 	p.endError = ""
 	p.url = url
+	p.pos = 0
+	p.seeking = false
+	p.title = ""
 	p.mu.Unlock()
 
 	if startSec > 0 {
@@ -352,16 +419,21 @@ func (p *Player) setOntop(on bool) {
 }
 
 type PlayerState struct {
-	Pause       bool
-	Fullscreen  bool
-	Ontop       bool
-	Mute        bool
-	Eof         bool
-	Running     bool
-	Dwidth      int
-	Dheight     int
-	HasDuration bool
-	Volume      int
+	Pause         bool
+	Fullscreen    bool
+	Ontop         bool
+	Mute          bool
+	Eof           bool
+	Seeking       bool
+	Running       bool
+	Dwidth        int
+	Dheight       int
+	Duration      float64
+	Pos           float64
+	HasDuration   bool
+	Volume        int
+	Title         string
+	PlaylistCount int
 }
 
 func (p *Player) snapshot() PlayerState {
@@ -369,9 +441,11 @@ func (p *Player) snapshot() PlayerState {
 	defer p.mu.Unlock()
 	return PlayerState{
 		Pause: p.pause, Fullscreen: p.fullscreen, Ontop: p.ontop,
-		Mute: p.mute, Eof: p.eof, Running: p.running,
+		Mute: p.mute, Eof: p.eof, Seeking: p.seeking, Running: p.running,
 		Dwidth: p.dwidth, Dheight: p.dheight,
+		Duration: p.duration, Pos: p.pos,
 		HasDuration: p.hasDuration, Volume: p.volume,
+		Title: p.title, PlaylistCount: p.playlistCount,
 	}
 }
 
@@ -385,6 +459,27 @@ func (p *Player) ready() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.cmdCh != nil
+}
+
+func (p *Player) resetPosition() {
+	p.mu.Lock()
+	p.pos = 0
+	p.seeking = false
+	p.mu.Unlock()
+}
+
+func (p *Player) urlNow() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.url
+}
+
+func (p *Player) seekRelative(sec float64) {
+	p.command("seek", sec, "relative")
+}
+
+func (p *Player) seekAbsolute(sec float64) {
+	p.command("seek", sec, "absolute+exact")
 }
 
 func (p *Player) hwndNow() uintptr {
@@ -564,4 +659,16 @@ func readLogTail(path string, n int64) string {
 	buf := make([]byte, n)
 	m, _ := f.Read(buf)
 	return string(buf[:m])
+}
+
+func qualityFormat(q string) string {
+	switch q {
+	case "1080":
+		return "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"
+	case "720":
+		return "bestvideo[height<=720]+bestaudio/best[height<=720]/best"
+	case "480":
+		return "bestvideo[height<=480]+bestaudio/best[height<=480]/best"
+	}
+	return ""
 }

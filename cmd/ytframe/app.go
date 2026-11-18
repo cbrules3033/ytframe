@@ -29,6 +29,9 @@ type App struct {
 	player    *Player
 	playerSeq int
 
+	history *History
+	sponsor *sponsorClient
+
 	barHwnd  uintptr
 	editHwnd uintptr
 	icon     uintptr
@@ -45,6 +48,16 @@ type App struct {
 	cleanupDone   bool
 	eofShown      bool
 	loadRestarted bool
+
+	historyDirty      bool
+	segments          []sponsorSegment
+	segmentsKey       string
+	lastSkipEnd       float64
+	pendingPause      bool
+	pendingFullscreen bool
+	loadingStart      int
+	loadedAt          time.Time
+	lastTrayTitle     string
 
 	status    string
 	statusErr bool
@@ -90,6 +103,8 @@ func main() {
 
 	app = &App{dir: dataDirPath}
 	app.settings = loadSettings()
+	app.history = loadHistory()
+	app.sponsor = newSponsorClient()
 	app.scale = float64(systemDPI()) / 96.0
 
 	// Single instance.
@@ -155,8 +170,25 @@ var helperProcCB = syscall.NewCallback(func(hwnd, msg, wparam, lparam uintptr) u
 		a.onTray(lparam)
 		return 0
 	case WM_HOTKEY:
-		if wparam == HK_PASTE {
+		switch wparam {
+		case HK_PASTE:
 			a.showBar()
+		case HK_PLAY:
+			if p := a.player; p != nil {
+				p.togglePause()
+			}
+		case HK_BACK:
+			if p := a.player; p != nil {
+				p.seekRelative(-10)
+			}
+		case HK_FWD:
+			if p := a.player; p != nil {
+				p.seekRelative(10)
+			}
+		case HK_MUTE:
+			if p := a.player; p != nil {
+				p.toggleMute()
+			}
 		}
 		return 0
 	case WM_APP_SHOWBAR:
@@ -218,6 +250,7 @@ func (a *App) createHelperWindow() {
 	}
 	helperHwnd = hwnd
 	pSetTimer.Call(hwnd, TIMER_POLL, 2000, 0)
+	pSetTimer.Call(hwnd, TIMER_SPONSOR, 500, 0)
 }
 
 func (a *App) createTray() {
@@ -249,11 +282,24 @@ func (a *App) removeTray() {
 }
 
 func (a *App) registerHotkey() {
-	r, _, _ := pRegisterHotKey.Call(helperHwnd, HK_PASTE, MOD_CONTROL|MOD_ALT, VK_V)
-	a.hotkeyOK = r != 0
-	if !a.hotkeyOK {
-		logf("global hotkey Ctrl+Alt+V could not be registered")
+	keys := []struct {
+		id  uintptr
+		vk  uintptr
+		key string
+	}{
+		{HK_PASTE, VK_V, "V"},
+		{HK_PLAY, VK_SPACE, "Space"},
+		{HK_BACK, VK_J, "J"},
+		{HK_FWD, VK_L, "L"},
+		{HK_MUTE, VK_M, "M"},
 	}
+	for _, k := range keys {
+		r, _, _ := pRegisterHotKey.Call(helperHwnd, k.id, MOD_CONTROL|MOD_ALT, k.vk)
+		if r == 0 {
+			logf("global hotkey Ctrl+Alt+%s could not be registered", k.key)
+		}
+	}
+	a.hotkeyOK = true
 }
 
 func (a *App) runLoop() {
@@ -285,46 +331,91 @@ func (a *App) showTrayMenu() {
 		return
 	}
 	defer pDestroyMenu.Call(menu)
+
+	hasPlayer := a.player != nil && a.player.isRunning()
+	st := PlayerState{}
+	if hasPlayer {
+		st = a.player.snapshot()
+	}
+
 	add := func(flags uintptr, id int, text string) {
 		pAppendMenuW.Call(menu, flags, uintptr(id), uintptr(unsafe.Pointer(u16(text))))
 	}
 	sep := func() { pAppendMenuW.Call(menu, MF_SEPARATOR, 0, 0) }
+	base := uintptr(MF_STRING)
+	if !hasPlayer {
+		base |= MF_GRAYED
+	}
+	check := func(on bool) uintptr {
+		f := uintptr(MF_STRING)
+		if on {
+			f |= MF_CHECKED
+		}
+		return f
+	}
 
 	add(MF_STRING, 100, "Paste link…\tCtrl+Alt+V")
-	if p := a.player; p != nil {
-		st := p.snapshot()
-		pauseLabel := "Pause"
-		if st.Pause {
-			pauseLabel = "Play"
-		}
-		muteLabel := "Mute"
-		if st.Mute {
-			muteLabel = "Unmute"
-		}
-		fsLabel := "Fullscreen"
-		if st.Fullscreen {
-			fsLabel = "Exit fullscreen"
-		}
-		add(MF_STRING, 101, pauseLabel)
-		add(MF_STRING, 102, muteLabel)
-		add(MF_STRING, 103, fsLabel)
-		sep()
+	pauseLabel := "Play/Pause"
+	if hasPlayer && st.Pause {
+		pauseLabel = "Play"
+	} else if hasPlayer {
+		pauseLabel = "Pause"
 	}
+	add(base, 101, pauseLabel+"\tCtrl+Alt+Space")
+	add(base, 102, "Back 10s\tCtrl+Alt+J")
+	add(base, 103, "Forward 10s\tCtrl+Alt+L")
+	muteLabel := "Mute"
+	if hasPlayer && st.Mute {
+		muteLabel = "Unmute"
+	}
+	add(base, 113, muteLabel+"\tCtrl+Alt+M")
+	sep()
+
+	if qmenu, _, _ := pCreatePopupMenu.Call(); qmenu != 0 {
+		qadd := func(id int, text string) {
+			pAppendMenuW.Call(qmenu, MF_STRING, uintptr(id), uintptr(unsafe.Pointer(u16(text))))
+		}
+		qadd(200, "Best")
+		qadd(201, "1080p")
+		qadd(202, "720p")
+		qadd(203, "480p")
+		cur := 200
+		switch a.settings.Quality {
+		case "1080":
+			cur = 201
+		case "720":
+			cur = 202
+		case "480":
+			cur = 203
+		}
+		pCheckMenuRadioItem.Call(qmenu, 200, 203, uintptr(cur), MF_BYCOMMAND)
+		pAppendMenuW.Call(menu, MF_POPUP|MF_STRING, qmenu,
+			uintptr(unsafe.Pointer(u16("Quality"))))
+	}
+
+	add(check(a.settings.Resume), 110, "Resume playback")
+	add(check(a.settings.SponsorBlock), 111, "SponsorBlock")
+	add(check(a.settings.Controls), 112, "Show controls on hover")
+	sep()
+
 	ontop := a.settings.Ontop
-	if p := a.player; p != nil {
-		ontop = p.snapshot().Ontop
+	if hasPlayer {
+		ontop = st.Ontop
 	}
-	flags := uintptr(MF_STRING)
-	if ontop {
-		flags |= MF_CHECKED
+	fsLabel := "Fullscreen"
+	if hasPlayer && st.Fullscreen {
+		fsLabel = "Exit fullscreen"
 	}
-	add(flags, 104, "Always on top")
+	add(check(ontop), 104, "Always on top")
+	add(base, 105, fsLabel)
 	sep()
-	add(MF_STRING, 105, "Update yt-dlp")
-	add(MF_STRING, 106, "Open log")
-	add(MF_STRING, 107, "About YTFrame")
+
+	add(MF_STRING, 106, "Update yt-dlp")
+	add(MF_STRING, 107, "Open log")
+	add(MF_STRING, 114, "Controls…")
+	add(MF_STRING, 108, "About YTFrame")
 	sep()
-	add(MF_STRING, 108, "Exit")
+	add(MF_STRING, 109, "Exit")
 
 	var pt POINT
 	pGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
@@ -338,37 +429,71 @@ func (a *App) showTrayMenu() {
 }
 
 func (a *App) onMenuCommand(id int) {
-	switch id {
-	case 100:
+	p := a.player
+	switch {
+	case id == 100:
 		a.showBar()
-	case 101:
-		if p := a.player; p != nil {
+	case id == 101:
+		if p != nil {
 			p.togglePause()
 		}
-	case 102:
-		if p := a.player; p != nil {
+	case id == 102:
+		if p != nil {
+			p.seekRelative(-10)
+		}
+	case id == 103:
+		if p != nil {
+			p.seekRelative(10)
+		}
+	case id == 113:
+		if p != nil {
 			p.toggleMute()
 		}
-	case 103:
-		if p := a.player; p != nil {
-			p.toggleFullscreen()
-		}
-	case 104:
-		if p := a.player; p != nil {
-			p.setOntop(!p.snapshot().Ontop)
-			a.settings.Ontop = p.snapshot().Ontop
+	case id == 104:
+		if p != nil {
+			cur := p.snapshot().Ontop
+			p.setOntop(!cur)
+			a.settings.Ontop = !cur
 		} else {
 			a.settings.Ontop = !a.settings.Ontop
 		}
 		saveSettings(a.settings)
-	case 105:
+	case id == 105:
+		if p != nil {
+			p.toggleFullscreen()
+		}
+	case id == 106:
 		a.updateYtdlp()
-	case 106:
+	case id == 107:
 		a.openLog()
-	case 107:
+	case id == 108:
 		a.showAbout()
-	case 108:
+	case id == 109:
 		a.requestExit()
+	case id == 110:
+		a.settings.Resume = !a.settings.Resume
+		saveSettings(a.settings)
+	case id == 111:
+		a.settings.SponsorBlock = !a.settings.SponsorBlock
+		a.segmentsKey = ""
+		a.segments = nil
+		a.lastSkipEnd = 0
+		saveSettings(a.settings)
+	case id == 112:
+		a.setControls(!a.settings.Controls)
+	case id == 114:
+		a.showControlsHelp()
+	case id >= 200 && id <= 203:
+		q := "best"
+		switch id {
+		case 201:
+			q = "1080"
+		case 202:
+			q = "720"
+		case 203:
+			q = "480"
+		}
+		a.switchQuality(q)
 	}
 }
 
@@ -506,7 +631,7 @@ func (a *App) submit() {
 		return
 	}
 	raw := getWindowText(a.editHwnd)
-	u, start, errMsg := normalizeURL(raw)
+	u, ts, errMsg := normalizeURL(raw)
 	if errMsg != "" {
 		a.setStatus(errMsg, true)
 		return
@@ -517,10 +642,15 @@ func (a *App) submit() {
 			return
 		}
 	}
+	start := a.resumeFor(u, ts)
+	a.saveCurrentPos()
 	a.loading = true
 	a.loadRestarted = false
 	a.loadingURL = u
+	a.loadingStart = start
 	a.retries = 0
+	a.pendingPause = false
+	a.pendingFullscreen = false
 	a.settings.LastURL = u
 	saveSettings(a.settings)
 	a.setStatus("Loading…", false)
@@ -541,15 +671,20 @@ func (a *App) submit() {
 }
 
 func (a *App) startPlayback(raw string, showBarIfError bool) {
-	u, start, errMsg := normalizeURL(raw)
+	u, ts, errMsg := normalizeURL(raw)
 	if errMsg != "" {
 		a.showBarWith(raw, errMsg, true)
 		return
 	}
+	start := a.resumeFor(u, ts)
+	a.saveCurrentPos()
 	a.loading = true
 	a.loadRestarted = false
 	a.loadingURL = u
+	a.loadingStart = start
 	a.retries = 0
+	a.pendingPause = false
+	a.pendingFullscreen = false
 	a.settings.LastURL = u
 	saveSettings(a.settings)
 	pSetTimer.Call(helperHwnd, TIMER_LOADWAIT, 30000, 0)
@@ -590,6 +725,22 @@ func (a *App) handleLoaded(id int) {
 	if a.barVisible {
 		a.hideBar(false)
 	}
+	if p := a.player; p != nil {
+		a.loadedAt = time.Now()
+		p.resetPosition()
+		if a.pendingPause {
+			p.pauseSet(true)
+			a.pendingPause = false
+		}
+		if a.pendingFullscreen {
+			p.command("set_property", "fullscreen", true)
+			a.pendingFullscreen = false
+		}
+		a.segmentsKey = ""
+		a.lastSkipEnd = 0
+		a.refreshTrayTitle()
+		a.trackPosition()
+	}
 	pSetTimer.Call(helperHwnd, TIMER_SNAP, 250, 0)
 }
 
@@ -610,6 +761,14 @@ func (a *App) handleEndFile(id int) {
 		a.eofShown = true
 		a.loading = false
 		pKillTimer.Call(helperHwnd, TIMER_LOADWAIT)
+		a.clearCurrentPos()
+		a.updateTrayTip("")
+		a.segmentsKey = ""
+		a.segments = nil
+		a.lastSkipEnd = 0
+		a.pendingPause = false
+		a.pendingFullscreen = false
+		a.loadingStart = 0
 		hasDur := p.snapshot().HasDuration
 		msg := "Finished. Paste another link or press Esc."
 		if !hasDur {
@@ -619,6 +778,8 @@ func (a *App) handleEndFile(id int) {
 		a.showBarWith(a.settings.LastURL, msg, false)
 	case "error":
 		a.loading = false
+		a.pendingPause = false
+		a.pendingFullscreen = false
 		pKillTimer.Call(helperHwnd, TIMER_LOADWAIT)
 		raw := p.lastErrorText()
 		logf("playback error: %s", raw)
@@ -646,7 +807,13 @@ func (a *App) handleMPVExit(id int) {
 	pKillTimer.Call(helperHwnd, TIMER_LOADWAIT)
 	pKillTimer.Call(helperHwnd, TIMER_RETRY)
 	pKillTimer.Call(helperHwnd, TIMER_SNAP)
+	a.saveCurrentPos()
 	a.captureRect()
+	a.updateTrayTip("")
+	a.segmentsKey = ""
+	a.segments = nil
+	a.pendingPause = false
+	a.pendingFullscreen = false
 	a.player = nil
 	if wasLoading || a.barVisible {
 		a.showBarWith(a.settings.LastURL, "The player closed. Press Enter to try again.", true)
@@ -661,9 +828,17 @@ func (a *App) onTimer(id uintptr) {
 	case TIMER_POLL:
 		a.pollCount++
 		a.captureRect()
+		a.trackPosition()
+		a.refreshTrayTitle()
 		if a.pollCount%5 == 0 {
 			saveSettings(a.settings)
+			if a.historyDirty && a.history != nil {
+				a.history.save()
+				a.historyDirty = false
+			}
 		}
+	case TIMER_SPONSOR:
+		a.sponsorTick()
 	case TIMER_SNAP:
 		pKillTimer.Call(helperHwnd, TIMER_SNAP)
 		a.snapAspect()
@@ -672,7 +847,7 @@ func (a *App) onTimer(id uintptr) {
 		if a.player != nil && a.loadingURL != "" {
 			a.loading = true
 			a.setStatus(fmt.Sprintf("Reconnecting… (%d/2)", a.retries), false)
-			a.player.load(a.loadingURL, 0)
+			a.player.load(a.loadingURL, a.loadingStart)
 			pSetTimer.Call(helperHwnd, TIMER_LOADWAIT, 30000, 0)
 		}
 	case TIMER_LOADWAIT:
@@ -686,7 +861,7 @@ func (a *App) onTimer(id uintptr) {
 				a.player = nil
 				old.killAsync()
 				a.loading = true
-				if err := a.startPlayer(a.loadingURL, 0); err == nil {
+				if err := a.startPlayer(a.loadingURL, a.loadingStart); err == nil {
 					pSetTimer.Call(helperHwnd, TIMER_LOADWAIT, 30000, 0)
 				} else {
 					a.loading = false
@@ -880,12 +1055,10 @@ func (a *App) openLog() {
 func (a *App) showAbout() {
 	msg := "YTFrame " + appVersion + "\n\n" +
 		"A borderless, video-only window for YouTube links.\n\n" +
-		"Enter — play the link\n" +
-		"Ctrl+Alt+V — paste another link\n" +
-		"Drag edges/corners — resize (keeps the video's aspect)\n" +
-		"Double-click — fullscreen\n" +
-		"Space — pause\n" +
-		"Right-click the video — player menu\n\n" +
+		"Hover near the bottom of the video for controls.\n" +
+		"The tray menu has quality, resume, SponsorBlock and more.\n\n" +
+		"Drag edges/corners to resize (aspect stays locked).\n" +
+		"Double-click for fullscreen.\n\n" +
 		"mpv and yt-dlp are bundled. If a video suddenly stops working,\n" +
 		"use “Update yt-dlp” in the tray menu."
 	messageBox(0, msg, "About YTFrame", MB_OK|MB_ICONINFORMATION)
@@ -896,14 +1069,20 @@ func (a *App) requestExit() {
 		return
 	}
 	a.quitting = true
+	a.saveCurrentPos()
 	a.captureRect()
 	saveSettings(a.settings)
+	if a.history != nil {
+		a.history.save()
+	}
 	if a.player != nil {
 		a.player.quitAndWait(2 * time.Second)
 		a.player = nil
 	}
 	a.removeTray()
-	pUnregisterHotKey.Call(helperHwnd, HK_PASTE)
+	for hk := uintptr(HK_PASTE); hk <= HK_LAST; hk++ {
+		pUnregisterHotKey.Call(helperHwnd, hk)
+	}
 	if a.barHwnd != 0 {
 		pDestroyWindow.Call(a.barHwnd)
 		a.barHwnd = 0
@@ -916,14 +1095,280 @@ func (a *App) cleanup() {
 		return
 	}
 	a.cleanupDone = true
+	a.saveCurrentPos()
 	a.captureRect()
 	saveSettings(a.settings)
+	if a.history != nil {
+		a.history.save()
+	}
 	if a.player != nil {
 		a.player.quitAndWait(2 * time.Second)
 		a.player = nil
 	}
 	a.removeTray()
 	a.freeGDI()
+}
+
+// ---- resume, quality and SponsorBlock ------------------------------------
+
+func (a *App) resumeFor(u string, ts int) int {
+	if ts > 0 {
+		return ts
+	}
+	if !a.settings.Resume {
+		return 0
+	}
+	return resumeStart(u, a.history)
+}
+
+func (a *App) saveCurrentPos() {
+	p := a.player
+	if p == nil || a.history == nil || !p.isRunning() {
+		return
+	}
+	st := p.snapshot()
+	url := p.urlNow()
+	if url == "" || hasPlaylistParam(url) {
+		return
+	}
+	if !st.HasDuration || st.Duration <= 0 || st.Pos <= 5 || st.Eof {
+		return
+	}
+	key := videoKey(url)
+	if key == "" {
+		return
+	}
+	a.history.set(key, HistoryEntry{
+		URL: url, Title: st.Title, Pos: st.Pos, Dur: st.Duration, Updated: nowUnix(),
+	})
+	a.history.save()
+	a.historyDirty = false
+}
+
+func (a *App) clearCurrentPos() {
+	p := a.player
+	if p == nil || a.history == nil {
+		return
+	}
+	url := p.urlNow()
+	if url == "" || hasPlaylistParam(url) {
+		return
+	}
+	a.history.remove(videoKey(url))
+	a.history.save()
+	a.historyDirty = false
+}
+
+func (a *App) trackPosition() {
+	p := a.player
+	if p == nil || a.history == nil || !p.isRunning() || a.loading {
+		return
+	}
+	if time.Since(a.loadedAt) < 2*time.Second {
+		return
+	}
+	st := p.snapshot()
+	url := p.urlNow()
+	if url == "" || hasPlaylistParam(url) {
+		return
+	}
+	if !st.HasDuration || st.Duration <= 0 || st.Pos <= 5 || st.Eof {
+		return
+	}
+	key := videoKey(url)
+	if key == "" {
+		return
+	}
+	if e, ok := a.history.get(key); ok &&
+		math.Abs(e.Pos-st.Pos) < 2 && e.Dur == st.Duration && e.Title == st.Title {
+		return
+	}
+	a.history.set(key, HistoryEntry{
+		URL: url, Title: st.Title, Pos: st.Pos, Dur: st.Duration, Updated: nowUnix(),
+	})
+	a.historyDirty = true
+}
+
+func (a *App) refreshTrayTitle() {
+	title := ""
+	if p := a.player; p != nil && p.isRunning() {
+		title = p.snapshot().Title
+	}
+	if title != a.lastTrayTitle {
+		a.lastTrayTitle = title
+		a.updateTrayTip(title)
+	}
+}
+
+func (a *App) updateTrayTip(title string) {
+	if !a.trayAdded {
+		return
+	}
+	tip := "YTFrame — video only"
+	if title != "" {
+		r := []rune(title)
+		if len(r) > 90 {
+			r = append(r[:90], '…')
+		}
+		tip = "YTFrame — " + string(r)
+	}
+	var nid NOTIFYICONDATAW
+	nid.CbSize = uint32(unsafe.Sizeof(nid))
+	nid.HWnd = helperHwnd
+	nid.UID = 1
+	nid.UFlags = NIF_TIP
+	u := syscall.StringToUTF16(tip)
+	n := len(u)
+	if n > len(nid.SzTip)-1 {
+		n = len(nid.SzTip) - 1
+	}
+	copy(nid.SzTip[:], u[:n])
+	nid.SzTip[len(nid.SzTip)-1] = 0
+	pShellNotifyIconW.Call(NIM_MODIFY, uintptr(unsafe.Pointer(&nid)))
+	a.lastTrayTitle = title
+}
+
+func (a *App) switchQuality(q string) {
+	switch q {
+	case "best", "1080", "720", "480":
+	default:
+		return
+	}
+	if q == a.settings.Quality {
+		return
+	}
+	a.settings.Quality = q
+	saveSettings(a.settings)
+
+	p := a.player
+	if p == nil || !p.isRunning() || a.loading {
+		return
+	}
+	st := p.snapshot()
+	if st.PlaylistCount > 1 {
+		logf("quality change deferred: playlist")
+		return
+	}
+	url := p.urlNow()
+	low := strings.ToLower(url)
+	if !strings.HasPrefix(low, "http://") && !strings.HasPrefix(low, "https://") {
+		return
+	}
+
+	a.saveCurrentPos()
+	a.captureRect()
+	a.pendingPause = st.Pause
+	a.pendingFullscreen = st.Fullscreen
+	pos := 0
+	if st.HasDuration && !st.Eof && st.Pos > 5 {
+		pos = int(st.Pos)
+	}
+
+	a.loading = true
+	a.loadRestarted = false
+	a.loadingURL = url
+	a.loadingStart = pos
+	a.retries = 0
+	old := a.player
+	a.player = nil
+	old.killAsync()
+	if err := a.startPlayer(url, pos); err != nil {
+		a.loading = false
+		a.pendingPause = false
+		a.pendingFullscreen = false
+		logf("quality restart failed: %v", err)
+		a.showBarWith(url, "Could not restart mpv: "+err.Error(), true)
+		return
+	}
+	pSetTimer.Call(helperHwnd, TIMER_LOADWAIT, 30000, 0)
+	logf("quality -> %s at %ds", q, pos)
+}
+
+func (a *App) setControls(on bool) {
+	a.settings.Controls = on
+	saveSettings(a.settings)
+	if p := a.player; p != nil {
+		mode := "never"
+		if on {
+			mode = "auto"
+		}
+		p.command("script-message", "osc-visibility", mode, "silent")
+	}
+}
+
+func (a *App) sponsorTick() {
+	if !a.settings.SponsorBlock || a.sponsor == nil {
+		return
+	}
+	p := a.player
+	if p == nil || !p.isRunning() || a.loading {
+		return
+	}
+	if time.Since(a.loadedAt) < 2*time.Second {
+		return
+	}
+	st := p.snapshot()
+	if !st.HasDuration || st.Duration <= 0 || st.Pause || st.Seeking || st.Eof {
+		return
+	}
+	url := p.urlNow()
+	if url == "" || hasPlaylistParam(url) {
+		return
+	}
+	id := youtubeID(url)
+	if id == "" {
+		return
+	}
+	if id != a.segmentsKey {
+		if segs, ok := a.sponsor.cached(id); ok {
+			a.segments = segs
+			a.segmentsKey = id
+			a.lastSkipEnd = 0
+		} else {
+			a.sponsor.fetchAsync(id)
+			return
+		}
+	}
+	if len(a.segments) == 0 {
+		return
+	}
+	pos := st.Pos
+	if a.lastSkipEnd > 0 && pos < a.lastSkipEnd-2 {
+		a.lastSkipEnd = 0
+	}
+	for _, seg := range a.segments {
+		if pos < seg.Start || pos >= seg.End-0.15 {
+			continue
+		}
+		if seg.End <= pos+0.25 || seg.End == a.lastSkipEnd {
+			continue
+		}
+		a.lastSkipEnd = seg.End
+		p.seekAbsolute(seg.End)
+		logf("sponsor: skipped %s %.1f-%.1f at %.1f", seg.Category, seg.Start, seg.End, pos)
+		return
+	}
+}
+
+func (a *App) showControlsHelp() {
+	msg := "YTFrame controls\n\n" +
+		"Hover the bottom of the video for the control bar.\n\n" +
+		"Space / Ctrl+Alt+Space   play or pause\n" +
+		"Left / Right             seek 5 seconds\n" +
+		"Ctrl+Alt+J / Ctrl+Alt+L  seek 10 seconds from anywhere\n" +
+		"Up / Down / wheel        volume\n" +
+		"M / Ctrl+Alt+M           mute\n" +
+		"F or double-click        fullscreen\n" +
+		"Esc                      leave fullscreen\n" +
+		"[ / ]                    playback speed\n" +
+		"PGUP / PGDN              chapters\n" +
+		"Home                     start from the beginning\n" +
+		"Ctrl+V                   play the clipboard link\n" +
+		"Ctrl+Alt+V               open the paste bar\n" +
+		"Right-click the video    player menu\n" +
+		"Right-click the tray     app menu\n\n" +
+		"The tray menu also has quality, resume and SponsorBlock toggles."
+	messageBox(0, msg, "YTFrame controls", MB_OK|MB_ICONINFORMATION)
 }
 
 // ---- URL helpers ---------------------------------------------------------

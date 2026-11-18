@@ -46,6 +46,7 @@ var (
 	pTrackPopupMenu         = user32.NewProc("TrackPopupMenu")
 	pCreatePopupMenu        = user32.NewProc("CreatePopupMenu")
 	pAppendMenuW            = user32.NewProc("AppendMenuW")
+	pCheckMenuRadioItem     = user32.NewProc("CheckMenuRadioItem")
 	pDestroyMenu            = user32.NewProc("DestroyMenu")
 	pSetWindowLongPtrW      = user32.NewProc("SetWindowLongPtrW")
 	pCallWindowProcW        = user32.NewProc("CallWindowProcW")
@@ -187,6 +188,10 @@ const (
 
 	VK_RETURN = 0x0D
 	VK_ESCAPE = 0x1B
+	VK_SPACE  = 0x20
+	VK_J      = 0x4A
+	VK_L      = 0x4C
+	VK_M      = 0x4D
 	VK_V      = 0x56
 
 	MOD_ALT     = 0x0001
@@ -233,7 +238,10 @@ const (
 	MF_STRING       = 0x0000
 	MF_SEPARATOR    = 0x0800
 	MF_CHECKED      = 0x0008
+	MF_UNCHECKED    = 0x0000
 	MF_GRAYED       = 0x0001
+	MF_POPUP        = 0x0010
+	MF_BYCOMMAND    = 0x0000
 	TPM_RETURNCMD   = 0x0100
 	TPM_RIGHTBUTTON = 0x0002
 
@@ -276,8 +284,14 @@ const (
 	TIMER_SNAP     = 2
 	TIMER_RETRY    = 3
 	TIMER_LOADWAIT = 4
+	TIMER_SPONSOR  = 5
 
 	HK_PASTE = 1
+	HK_PLAY  = 2
+	HK_BACK  = 3
+	HK_FWD   = 4
+	HK_MUTE  = 5
+	HK_LAST  = 5
 )
 
 // ---- structs -------------------------------------------------------------

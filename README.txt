@@ -1,4 +1,4 @@
-YTFrame 1.0.0
+YTFrame 1.1.0
 =============
 
 A borderless, video-only YouTube window.
@@ -9,28 +9,50 @@ QUICK START
 2. Run YTFrame.exe.
 3. Paste a link and press Enter.
 
-No installer, no registry, no admin rights. Settings and logs are written next
-to YTFrame.exe. If the folder is read-only they go to %LOCALAPPDATA%\YTFrame.
+No installer, no registry, no admin rights. Settings, history and logs are
+written next to YTFrame.exe. If the folder is read-only they go to
+%LOCALAPPDATA%\YTFrame.
 
 Windows SmartScreen will warn because the exe is unsigned:
 click "More info" -> "Run anyway".
 
 CONTROLS
 --------
-Ctrl+Alt+V     open the paste bar from anywhere
-Enter          play the pasted link
-Ctrl+V         in the video window: replace with the clipboard link
-Drag           move the window (drag the video itself)
-Drag edges     resize, keeping the video's aspect ratio
-Double-click   fullscreen (Esc leaves it)
-Space          pause
-Left / Right   seek
-Up / Down      volume
-M              mute
-Right-click    mpv's player menu
-Tray icon      paste, pause, mute, fullscreen, always on top,
-               update yt-dlp, open log, about, exit
-Q              quit while the video is focused
+Hover the bottom of the video   control bar (play, seek, volume, fullscreen)
+Ctrl+Alt+V                      open the paste bar from anywhere
+Enter                           play the pasted link
+Ctrl+V                          in the video window: play the clipboard link
+Drag                            move the window (drag the video itself)
+Drag edges/corners              resize, keeping the video's aspect ratio
+Double-click / F                fullscreen (Esc leaves it)
+Space / Ctrl+Alt+Space          play or pause
+Left / Right                    seek 5 seconds
+Ctrl+Alt+J / Ctrl+Alt+L         seek 10 seconds from anywhere
+Up / Down / wheel               volume
+M / Ctrl+Alt+M                  mute
+[ / ]                           speed
+PGUP / PGDN                     chapters
+Home                            start from the beginning
+Right-click video               mpv's player menu
+Right-click tray                app menu
+Q                               quit while the video is focused
+
+RESUME
+------
+Normal videos longer than a minute resume where you left off. Live streams
+never resume. A timestamp in the link (&t=) wins. Tray -> Resume playback
+turns it off; Home starts from the beginning.
+
+QUALITY
+-------
+Tray -> Quality: Best, 1080p, 720p, 480p. Switching while a video plays
+reloads at the same timestamp (brief black flash). The choice is remembered.
+
+SPONSORBLOCK
+------------
+Tray -> SponsorBlock skips sponsor, self-promo and interaction segments on
+YouTube videos. Only the video ID is sent to sponsor.ajay.app. Not every video
+has segments, and live streams/playlists are skipped.
 
 LIVE STREAMS
 ------------
@@ -49,6 +71,7 @@ YTFrame.exe    the app
 mpv.exe        playback engine
 yt-dlp.exe     link resolver
 settings.json  created on first run
+history.json   resume positions and titles
 ytframe.log    app log
 mpv.log        player log
 

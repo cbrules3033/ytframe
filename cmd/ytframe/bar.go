@@ -371,7 +371,7 @@ func (a *App) paintBar(hdc uintptr) {
 			DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX)
 	} else {
 		pSetTextColor.Call(mem, colMuted)
-		drawText(mem, "Enter to play  ·  Esc to close  ·  Ctrl+Alt+V anytime",
+		drawText(mem, "Enter play  ·  Esc close  ·  Ctrl+Alt+V paste  ·  hover bottom for controls",
 			RECT{Left: int32(24 * s), Top: int32(96 * s), Right: w - int32(24*s), Bottom: int32(126 * s)},
 			DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX)
 	}
