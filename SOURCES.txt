@@ -1,0 +1,17 @@
+YTFrame 1.0.0 - bundled component sources
+==========================================
+
+mpv
+  version:  v0.42.0-101-gf92afa75c
+  commit:   f92afa75cd
+  source:   https://github.com/mpv-player/mpv/tree/f92afa75cd
+  binary:   https://github.com/zhongfly/mpv-winbuild/releases/tag/2026-11-18-f92afa75cd
+            asset: mpv-x86_64-20261118-git-f92afa75cd.7z
+
+yt-dlp
+  version:  2026.10.26
+  source:   https://github.com/yt-dlp/yt-dlp/releases/tag/2026.10.26
+  binary:   https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp.exe
+
+YTFrame
+  source:   https://github.com/cbrules3033/ytframe

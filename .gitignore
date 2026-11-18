@@ -1,0 +1,5 @@
+/vendor/
+/dist/
+*.log
+settings.json
+*.tmp

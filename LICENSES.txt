@@ -1,0 +1,28 @@
+YTFrame is distributed with two third-party programs. They are separate
+programs, bundled together for convenience.
+
+1. mpv (mpv.exe)
+   Licence: GNU General Public License version 2 or later (GPLv2+)
+   Project: https://github.com/mpv-player/mpv
+   The full GPLv2 text is in LICENSE.GPL-2.0.
+
+   Bundled build:
+     mpv v0.42.0-101-gf92afa75c
+     built 2026-11-18 by https://github.com/zhongfly/mpv-winbuild
+     release tag 2026-11-18-f92afa75cd
+
+   Corresponding source:
+     https://github.com/mpv-player/mpv/tree/f92afa75cd
+     Build scripts: https://github.com/zhongfly/mpv-winbuild
+
+2. yt-dlp (yt-dlp.exe)
+   Licence: The Unlicense (public domain)
+   Project: https://github.com/yt-dlp/yt-dlp
+   Version: 2026.10.26
+   Source: https://github.com/yt-dlp/yt-dlp/releases/tag/2026.10.26
+
+3. YTFrame (YTFrame.exe)
+   Licence: MIT (see LICENSE)
+   Source: https://github.com/cbrules3033/ytframe
+
+mpv and yt-dlp are unmodified copies of their official release binaries.
