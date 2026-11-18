@@ -710,9 +710,12 @@ func (a *App) captureRect() {
 	if hwnd == 0 {
 		return
 	}
-	if p.snapshot().Fullscreen {
+	st := p.snapshot()
+	if st.Fullscreen {
 		return
 	}
+	a.settings.Volume = st.Volume
+	a.settings.Ontop = st.Ontop
 	var rc RECT
 	if ok, _, _ := pGetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&rc))); ok == 0 {
 		return
