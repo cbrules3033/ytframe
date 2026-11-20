@@ -1,58 +1,107 @@
-YTFrame 1.1.0
+YTFrame 1.2.0
 =============
 
-A borderless, video-only YouTube window.
+A borderless, video-only YouTube window with a floating control bar and a
+built-in YouTube browser.
 
 QUICK START
 -----------
 1. Extract this folder anywhere (Desktop, USB stick, ...).
 2. Run YTFrame.exe.
-3. Paste a link and press Enter.
+3. Paste a link and press Enter, or use Browse YouTube.
 
-No installer, no registry, no admin rights. Settings, history and logs are
-written next to YTFrame.exe. If the folder is read-only they go to
-%LOCALAPPDATA%\YTFrame.
+No installer, no registry, no admin rights. Settings, history, logs and the
+browser profile are written next to YTFrame.exe. If the folder is read-only
+they go to %LOCALAPPDATA%\YTFrame.
 
 Windows SmartScreen will warn because the exe is unsigned:
 click "More info" -> "Run anyway".
 
-CONTROLS
---------
-Hover the bottom of the video   control bar (play, seek, volume, fullscreen)
-Ctrl+Alt+V                      open the paste bar from anywhere
-Enter                           play the pasted link
-Ctrl+V                          in the video window: play the clipboard link
-Drag                            move the window (drag the video itself)
-Drag edges/corners              resize, keeping the video's aspect ratio
-Double-click / F                fullscreen (Esc leaves it)
-Space / Ctrl+Alt+Space          play or pause
-Left / Right                    seek 5 seconds
-Ctrl+Alt+J / Ctrl+Alt+L         seek 10 seconds from anywhere
-Up / Down / wheel               volume
-M / Ctrl+Alt+M                  mute
-[ / ]                           speed
-PGUP / PGDN                     chapters
-Home                            start from the beginning
-Right-click video               mpv's player menu
-Right-click tray                app menu
-Q                               quit while the video is focused
+CONTROL BAR
+-----------
+A separate window, usable even when the video is tiny. Always on top by
+default (pin toggles it). It never steals keyboard focus.
 
-RESUME
-------
-Normal videos longer than a minute resume where you left off. Live streams
-never resume. A timestamp in the link (&t=) wins. Tray -> Resume playback
-turns it off; Home starts from the beginning.
+  seek line          click or drag to seek
+  play / pause
+  -10 / +10          seek 10 seconds
+  speaker + slider   volume / mute
+  fullscreen
+  eye                video mode: show always / hide on pause / always hidden
+  grid               layouts
+  pin                control bar always on top
+  Browse             open YouTube
+  X                  hide the bar
 
-QUALITY
+Show/hide the bar: Ctrl+Alt+B or tray -> Control bar.
+The bars overflow menu has everything, including video always-on-top and the
+optional in-video mpv controls.
+
+VIDEO MODES
+-----------
+Show always          the paused frame stays visible
+Hide on pause        pause hides the picture; the bar stays as the remote
+Always hidden        audio-only; the picture stays hidden while playing
+
+Seeking, volume, SponsorBlock and resume all work while the video is hidden.
+Fullscreen from audio-only brings the picture back.
+
+LAYOUTS
 -------
-Tray -> Quality: Best, 1080p, 720p, 480p. Switching while a video plays
-reloads at the same timestamp (brief black flash). The choice is remembered.
+Five slots storing the video window and control bar positions.
 
-SPONSORBLOCK
-------------
-Tray -> SponsorBlock skips sponsor, self-promo and interaction segments on
-YouTube videos. Only the video ID is sent to sponsor.ajay.app. Not every video
-has segments, and live streams/playlists are skipped.
+Ctrl+Alt+1...5          apply a layout
+Ctrl+Alt+Shift+1...5    save the current arrangement into a slot
+Tray -> Layouts         apply / save / set default / clear
+Bar grid button         same menu
+
+One slot can be the default; it is applied at startup / when the first video
+opens. Applying a layout while playing honors the saved width and top-left
+and recomputes the height for the current video aspect.
+
+YOUTUBE BROWSER
+---------------
+Tray -> Browse YouTube, or the bars Browse button. A borderless window with
+a dark toolbar and the real YouTube site. Clicking a video sends it to the
+player and closes the browser.
+
+Needs the Microsoft Edge WebView2 Runtime, which normally comes with Edge on
+Windows 10/11. If it is missing, the browser window has a Get WebView2 button;
+the player keeps working without it.
+
+The profile is stored in browse-data\ next to the exe, so logins/cookies
+survive restarts. Tray -> Clear YouTube browsing data removes it.
+YouTube ads/tracking live in the browse window; the player stays ad-free.
+Google may block sign-in inside embedded browsers; browsing still works
+logged out.
+
+OTHER CONTROLS
+--------------
+Ctrl+Alt+V          paste bar
+Enter               play the pasted link
+Ctrl+V              play the clipboard link in the video window
+Drag                move the video window
+Drag edges/corners  resize, keeping the video aspect
+Double-click / F    fullscreen (Esc leaves it)
+Space / Ctrl+Alt+Space   play or pause
+Left / Right        seek 5 seconds
+Ctrl+Alt+J / L      seek 10 seconds from anywhere
+Up / Down / wheel   volume
+M / Ctrl+Alt+M      mute
+[ / ]               speed
+PGUP / PGDN         chapters
+Home                start from the beginning
+Right-click video   mpv player menu
+Right-click tray    app menu
+Q                   quit while the video is focused
+
+RESUME / QUALITY / SPONSORBLOCK
+-------------------------------
+Resume remembers VOD positions; never live, never within ~20s of the end, and
+a &t= timestamp wins. Tray toggle; Home starts over.
+Quality: Best / 1080p / 720p / 480p; reloads at the same spot.
+SponsorBlock skips sponsor, self-promo and interaction segments on YouTube
+VODs. Only the video ID is sent to sponsor.ajay.app.
 
 LIVE STREAMS
 ------------
@@ -62,8 +111,8 @@ YouTube serves (usually 10-20 seconds behind the live edge).
 
 IF A VIDEO STOPS WORKING
 ------------------------
-YouTube changes things regularly. Right-click the tray icon and choose
-"Update yt-dlp". It updates the bundled yt-dlp.exe in place (no admin needed).
+Right-click the tray icon and choose "Update yt-dlp". It updates the bundled
+yt-dlp.exe in place (no admin needed).
 
 FILES
 -----
@@ -72,6 +121,7 @@ mpv.exe        playback engine
 yt-dlp.exe     link resolver
 settings.json  created on first run
 history.json   resume positions and titles
+browse-data\   WebView2 profile (logins/cookies)
 ytframe.log    app log
 mpv.log        player log
 
@@ -79,10 +129,12 @@ Delete the folder to uninstall.
 
 NOT SUPPORTED
 -------------
-DRM'd YouTube Movies, age-restricted videos, members-only videos, and
-videos that require a YouTube sign-in.
+DRM'd YouTube Movies, age-restricted videos, members-only videos, and videos
+that require a YouTube sign-in in the player. Google sign-in inside the
+browse window may be blocked.
 
 LICENCES
 --------
-YTFrame is MIT. mpv is GPLv2+; yt-dlp is Unlicense. See LICENSES.txt and
-LICENSE.GPL-2.0. Exact versions and source links are in SOURCES.txt.
+YTFrame is MIT. mpv is GPLv2+; yt-dlp is Unlicense; go-webview2 is MIT.
+See LICENSES.txt and LICENSE.GPL-2.0. Versions and source links are in
+SOURCES.txt.

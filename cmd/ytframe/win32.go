@@ -18,76 +18,77 @@ var (
 )
 
 var (
-	pRegisterClassExW       = user32.NewProc("RegisterClassExW")
-	pCreateWindowExW        = user32.NewProc("CreateWindowExW")
-	pDefWindowProcW         = user32.NewProc("DefWindowProcW")
-	pGetMessageW            = user32.NewProc("GetMessageW")
-	pTranslateMessage       = user32.NewProc("TranslateMessage")
-	pDispatchMessageW       = user32.NewProc("DispatchMessageW")
-	pPostQuitMessage        = user32.NewProc("PostQuitMessage")
-	pDestroyWindow          = user32.NewProc("DestroyWindow")
-	pShowWindow             = user32.NewProc("ShowWindow")
-	pSetWindowPos           = user32.NewProc("SetWindowPos")
-	pGetWindowRect          = user32.NewProc("GetWindowRect")
-	pGetClientRect          = user32.NewProc("GetClientRect")
-	pSetForegroundWindow    = user32.NewProc("SetForegroundWindow")
-	pGetForegroundWindow    = user32.NewProc("GetForegroundWindow")
-	pSetFocus               = user32.NewProc("SetFocus")
-	pGetFocus               = user32.NewProc("GetFocus")
-	pSendMessageW           = user32.NewProc("SendMessageW")
-	pPostMessageW           = user32.NewProc("PostMessageW")
-	pLoadCursorW            = user32.NewProc("LoadCursorW")
-	pLoadIconW              = user32.NewProc("LoadIconW")
-	pLoadImageW             = user32.NewProc("LoadImageW")
-	pSetCursor              = user32.NewProc("SetCursor")
-	pRegisterHotKey         = user32.NewProc("RegisterHotKey")
-	pUnregisterHotKey       = user32.NewProc("UnregisterHotKey")
-	pGetCursorPos           = user32.NewProc("GetCursorPos")
-	pTrackPopupMenu         = user32.NewProc("TrackPopupMenu")
-	pCreatePopupMenu        = user32.NewProc("CreatePopupMenu")
-	pAppendMenuW            = user32.NewProc("AppendMenuW")
-	pCheckMenuRadioItem     = user32.NewProc("CheckMenuRadioItem")
-	pDestroyMenu            = user32.NewProc("DestroyMenu")
-	pSetWindowLongPtrW      = user32.NewProc("SetWindowLongPtrW")
-	pCallWindowProcW        = user32.NewProc("CallWindowProcW")
-	pSetTimer               = user32.NewProc("SetTimer")
-	pKillTimer              = user32.NewProc("KillTimer")
-	pInvalidateRect         = user32.NewProc("InvalidateRect")
-	pGetDC                  = user32.NewProc("GetDC")
-	pReleaseDC              = user32.NewProc("ReleaseDC")
-	pBeginPaint             = user32.NewProc("BeginPaint")
-	pEndPaint               = user32.NewProc("EndPaint")
-	pFillRect               = user32.NewProc("FillRect")
-	pDrawTextW              = user32.NewProc("DrawTextW")
-	pOpenClipboard          = user32.NewProc("OpenClipboard")
-	pCloseClipboard         = user32.NewProc("CloseClipboard")
-	pGetClipboardData       = user32.NewProc("GetClipboardData")
-	pIsClipboardFormatAvail = user32.NewProc("IsClipboardFormatAvailable")
-	pEnumWindows            = user32.NewProc("EnumWindows")
-	pFindWindowW            = user32.NewProc("FindWindowW")
-	pGetWindowThreadProcID  = user32.NewProc("GetWindowThreadProcessId")
-	pIsWindowVisible        = user32.NewProc("IsWindowVisible")
-	pIsWindow               = user32.NewProc("IsWindow")
-	pIsIconic               = user32.NewProc("IsIconic")
-	pSetWindowTextW         = user32.NewProc("SetWindowTextW")
-	pGetWindowTextW         = user32.NewProc("GetWindowTextW")
-	pGetWindowTextLengthW   = user32.NewProc("GetWindowTextLengthW")
-	pMessageBoxW            = user32.NewProc("MessageBoxW")
-	pMonitorFromWindow      = user32.NewProc("MonitorFromWindow")
-	pMonitorFromPoint       = user32.NewProc("MonitorFromPoint")
-	pGetMonitorInfoW        = user32.NewProc("GetMonitorInfoW")
-	pSetWindowRgn           = user32.NewProc("SetWindowRgn")
-	pGetDpiForWindow        = user32.NewProc("GetDpiForWindow")
-	pGetDpiForSystem        = user32.NewProc("GetDpiForSystem")
-	pSetProcessDPIAwareCtx  = user32.NewProc("SetProcessDpiAwarenessContext")
-	pSystemParametersInfoW  = user32.NewProc("SystemParametersInfoW")
-	pSetWindowLongPtrW32    = user32.NewProc("SetWindowLongW")
-	pMoveWindow             = user32.NewProc("MoveWindow")
-	pUpdateWindow           = user32.NewProc("UpdateWindow")
-	pGetSystemMetrics       = user32.NewProc("GetSystemMetrics")
-	pReleaseCapture         = user32.NewProc("ReleaseCapture")
-	pSetCapture             = user32.NewProc("SetCapture")
-	pTrackMouseEvent        = user32.NewProc("TrackMouseEvent")
+	pRegisterClassExW         = user32.NewProc("RegisterClassExW")
+	pCreateWindowExW          = user32.NewProc("CreateWindowExW")
+	pDefWindowProcW           = user32.NewProc("DefWindowProcW")
+	pGetMessageW              = user32.NewProc("GetMessageW")
+	pTranslateMessage         = user32.NewProc("TranslateMessage")
+	pDispatchMessageW         = user32.NewProc("DispatchMessageW")
+	pPostQuitMessage          = user32.NewProc("PostQuitMessage")
+	pDestroyWindow            = user32.NewProc("DestroyWindow")
+	pShowWindow               = user32.NewProc("ShowWindow")
+	pSetWindowPos             = user32.NewProc("SetWindowPos")
+	pGetWindowRect            = user32.NewProc("GetWindowRect")
+	pGetClientRect            = user32.NewProc("GetClientRect")
+	pSetForegroundWindow      = user32.NewProc("SetForegroundWindow")
+	pAllowSetForegroundWindow = user32.NewProc("AllowSetForegroundWindow")
+	pGetForegroundWindow      = user32.NewProc("GetForegroundWindow")
+	pSetFocus                 = user32.NewProc("SetFocus")
+	pGetFocus                 = user32.NewProc("GetFocus")
+	pSendMessageW             = user32.NewProc("SendMessageW")
+	pPostMessageW             = user32.NewProc("PostMessageW")
+	pLoadCursorW              = user32.NewProc("LoadCursorW")
+	pLoadIconW                = user32.NewProc("LoadIconW")
+	pLoadImageW               = user32.NewProc("LoadImageW")
+	pSetCursor                = user32.NewProc("SetCursor")
+	pRegisterHotKey           = user32.NewProc("RegisterHotKey")
+	pUnregisterHotKey         = user32.NewProc("UnregisterHotKey")
+	pGetCursorPos             = user32.NewProc("GetCursorPos")
+	pTrackPopupMenu           = user32.NewProc("TrackPopupMenu")
+	pCreatePopupMenu          = user32.NewProc("CreatePopupMenu")
+	pAppendMenuW              = user32.NewProc("AppendMenuW")
+	pCheckMenuRadioItem       = user32.NewProc("CheckMenuRadioItem")
+	pDestroyMenu              = user32.NewProc("DestroyMenu")
+	pSetWindowLongPtrW        = user32.NewProc("SetWindowLongPtrW")
+	pCallWindowProcW          = user32.NewProc("CallWindowProcW")
+	pSetTimer                 = user32.NewProc("SetTimer")
+	pKillTimer                = user32.NewProc("KillTimer")
+	pInvalidateRect           = user32.NewProc("InvalidateRect")
+	pGetDC                    = user32.NewProc("GetDC")
+	pReleaseDC                = user32.NewProc("ReleaseDC")
+	pBeginPaint               = user32.NewProc("BeginPaint")
+	pEndPaint                 = user32.NewProc("EndPaint")
+	pFillRect                 = user32.NewProc("FillRect")
+	pDrawTextW                = user32.NewProc("DrawTextW")
+	pOpenClipboard            = user32.NewProc("OpenClipboard")
+	pCloseClipboard           = user32.NewProc("CloseClipboard")
+	pGetClipboardData         = user32.NewProc("GetClipboardData")
+	pIsClipboardFormatAvail   = user32.NewProc("IsClipboardFormatAvailable")
+	pEnumWindows              = user32.NewProc("EnumWindows")
+	pFindWindowW              = user32.NewProc("FindWindowW")
+	pGetWindowThreadProcID    = user32.NewProc("GetWindowThreadProcessId")
+	pIsWindowVisible          = user32.NewProc("IsWindowVisible")
+	pIsWindow                 = user32.NewProc("IsWindow")
+	pIsIconic                 = user32.NewProc("IsIconic")
+	pSetWindowTextW           = user32.NewProc("SetWindowTextW")
+	pGetWindowTextW           = user32.NewProc("GetWindowTextW")
+	pGetWindowTextLengthW     = user32.NewProc("GetWindowTextLengthW")
+	pMessageBoxW              = user32.NewProc("MessageBoxW")
+	pMonitorFromWindow        = user32.NewProc("MonitorFromWindow")
+	pMonitorFromPoint         = user32.NewProc("MonitorFromPoint")
+	pGetMonitorInfoW          = user32.NewProc("GetMonitorInfoW")
+	pSetWindowRgn             = user32.NewProc("SetWindowRgn")
+	pGetDpiForWindow          = user32.NewProc("GetDpiForWindow")
+	pGetDpiForSystem          = user32.NewProc("GetDpiForSystem")
+	pSetProcessDPIAwareCtx    = user32.NewProc("SetProcessDpiAwarenessContext")
+	pSystemParametersInfoW    = user32.NewProc("SystemParametersInfoW")
+	pSetWindowLongPtrW32      = user32.NewProc("SetWindowLongW")
+	pMoveWindow               = user32.NewProc("MoveWindow")
+	pUpdateWindow             = user32.NewProc("UpdateWindow")
+	pGetSystemMetrics         = user32.NewProc("GetSystemMetrics")
+	pReleaseCapture           = user32.NewProc("ReleaseCapture")
+	pSetCapture               = user32.NewProc("SetCapture")
+	pTrackMouseEvent          = user32.NewProc("TrackMouseEvent")
 
 	pCreateMutexW     = kernel32.NewProc("CreateMutexW")
 	pGetModuleHandleW = kernel32.NewProc("GetModuleHandleW")
@@ -108,6 +109,12 @@ var (
 	pSetBkMode           = gdi32.NewProc("SetBkMode")
 	pCreateFontW         = gdi32.NewProc("CreateFontW")
 	pCreateRoundRectRgn  = gdi32.NewProc("CreateRoundRectRgn")
+	pEllipse             = gdi32.NewProc("Ellipse")
+	pPolygon             = gdi32.NewProc("Polygon")
+	pMoveToEx            = gdi32.NewProc("MoveToEx")
+	pLineTo              = gdi32.NewProc("LineTo")
+	pArc                 = gdi32.NewProc("Arc")
+	pRectangle           = gdi32.NewProc("Rectangle")
 	pRoundRect           = gdi32.NewProc("RoundRect")
 	pGetStockObject      = gdi32.NewProc("GetStockObject")
 	pCreateCompatibleDC  = gdi32.NewProc("CreateCompatibleDC")
@@ -131,12 +138,17 @@ var (
 const (
 	WS_OVERLAPPED    = 0x00000000
 	WS_POPUP         = 0x80000000
+	WS_MINIMIZEBOX   = 0x00020000
+	WS_MAXIMIZEBOX   = 0x00010000
+	WS_THICKFRAME    = 0x00040000
+	WS_SYSMENU       = 0x00080000
 	WS_CHILD         = 0x40000000
 	WS_VISIBLE       = 0x10000000
 	WS_CLIPCHILDREN  = 0x02000000
 	WS_CLIPSIBLINGS  = 0x04000000
 	WS_TABSTOP       = 0x00010000
 	WS_EX_TOPMOST    = 0x00000008
+	WS_EX_APPWINDOW  = 0x00040000
 	WS_EX_TOOLWINDOW = 0x00000080
 	WS_EX_NOACTIVATE = 0x08000000
 
@@ -149,18 +161,24 @@ const (
 	EC_LEFTMARGIN   = 0x0001
 	EC_RIGHTMARGIN  = 0x0002
 
-	SW_HIDE = 0
-	SW_SHOW = 5
+	SW_HIDE           = 0
+	SW_SHOW           = 5
+	SW_SHOWNOACTIVATE = 4
+	SW_MINIMIZE       = 6
+	SW_RESTORE        = 9
 
 	SWP_NOSIZE       = 0x0001
 	SWP_NOMOVE       = 0x0002
 	SWP_NOZORDER     = 0x0004
 	SWP_NOACTIVATE   = 0x0010
 	SWP_FRAMECHANGED = 0x0020
+	SWP_SHOWWINDOW   = 0x0040
+	SWP_HIDEWINDOW   = 0x0080
 
 	WM_DESTROY       = 0x0002
 	WM_CREATE        = 0x0001
 	WM_SIZE          = 0x0005
+	WM_GETMINMAXINFO = 0x0024
 	WM_ACTIVATE      = 0x0006
 	WM_PAINT         = 0x000F
 	WM_CLOSE         = 0x0010
@@ -174,6 +192,7 @@ const (
 	WM_LBUTTONUP     = 0x0202
 	WM_LBUTTONDBLCLK = 0x0203
 	WM_RBUTTONUP     = 0x0205
+	WM_MOUSEWHEEL    = 0x020A
 	WM_CONTEXTMENU   = 0x007B
 	WM_SETCURSOR     = 0x0020
 	WM_MOUSELEAVE    = 0x02A3
@@ -193,6 +212,12 @@ const (
 	VK_L      = 0x4C
 	VK_M      = 0x4D
 	VK_V      = 0x56
+	VK_B      = 0x42
+	VK_1      = 0x31
+	VK_2      = 0x32
+	VK_3      = 0x33
+	VK_4      = 0x34
+	VK_5      = 0x35
 
 	MOD_ALT     = 0x0001
 	MOD_CONTROL = 0x0002
@@ -205,10 +230,12 @@ const (
 	GWLP_WNDPROC = ^uintptr(3) // -4
 
 	DT_LEFT         = 0x0000
+	DT_RIGHT        = 0x0002
 	DT_CENTER       = 0x0001
 	DT_VCENTER      = 0x0004
 	DT_SINGLELINE   = 0x0020
 	DT_END_ELLIPSIS = 0x8000
+	DT_WORDBREAK    = 0x0010
 	DT_NOPREFIX     = 0x0800
 
 	PS_SOLID          = 0
@@ -253,8 +280,11 @@ const (
 	LR_SHARED       = 0x8000
 
 	MB_OK              = 0
+	MB_YESNO           = 0x4
 	MB_ICONERROR       = 0x10
+	MB_ICONQUESTION    = 0x20
 	MB_ICONINFORMATION = 0x40
+	IDYES              = 6
 
 	ERROR_ALREADY_EXISTS = 183
 
@@ -279,19 +309,25 @@ const (
 	WM_APP_WINDOWFOUND = WM_APP + 6
 	WM_APP_UPDATEDONE  = WM_APP + 7
 	WM_APP_SNAP        = WM_APP + 8
+	WM_APP_BROWSEEXIT  = WM_APP + 9
 
 	TIMER_POLL     = 1
 	TIMER_SNAP     = 2
 	TIMER_RETRY    = 3
 	TIMER_LOADWAIT = 4
 	TIMER_SPONSOR  = 5
+	TIMER_BAR      = 6
+	TIMER_LAYOUT   = 7
 
-	HK_PASTE = 1
-	HK_PLAY  = 2
-	HK_BACK  = 3
-	HK_FWD   = 4
-	HK_MUTE  = 5
-	HK_LAST  = 5
+	HK_PASTE       = 1
+	HK_PLAY        = 2
+	HK_BACK        = 3
+	HK_FWD         = 4
+	HK_MUTE        = 5
+	HK_BAR         = 6
+	HK_LAYOUT      = 10
+	HK_LAYOUT_SAVE = 20
+	HK_LAST        = 24
 )
 
 // ---- structs -------------------------------------------------------------
@@ -515,8 +551,9 @@ func setWindowText(hwnd uintptr, s string) {
 	pSetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(u16(s))))
 }
 
-func messageBox(owner uintptr, text, caption string, flags uint32) {
-	pMessageBoxW.Call(owner, uintptr(unsafe.Pointer(u16(text))), uintptr(unsafe.Pointer(u16(caption))), uintptr(flags))
+func messageBox(owner uintptr, text, caption string, flags uint32) uintptr {
+	r, _, _ := pMessageBoxW.Call(owner, uintptr(unsafe.Pointer(u16(text))), uintptr(unsafe.Pointer(u16(caption))), uintptr(flags))
+	return r
 }
 
 func clipboardText() string {
@@ -555,8 +592,12 @@ func clipboardText() string {
 }
 
 func sendCopyData(dst uintptr, payload string) bool {
+	return sendCopyDataKind(dst, 1, payload)
+}
+
+func sendCopyDataKind(dst uintptr, kind uintptr, payload string) bool {
 	b := append([]byte(payload), 0)
-	cds := COPYDATASTRUCT{DwData: 1, CbData: uint32(len(b)), LpData: uintptr(unsafe.Pointer(&b[0]))}
+	cds := COPYDATASTRUCT{DwData: kind, CbData: uint32(len(b)), LpData: uintptr(unsafe.Pointer(&b[0]))}
 	r, _, _ := pSendMessageW.Call(dst, WM_COPYDATA, 0, uintptr(unsafe.Pointer(&cds)))
 	return r != 0
 }

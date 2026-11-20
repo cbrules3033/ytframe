@@ -26,3 +26,14 @@ programs, bundled together for convenience.
    Source: https://github.com/cbrules3033/ytframe
 
 mpv and yt-dlp are unmodified copies of their official release binaries.
+
+4. go-webview2 (compiled into YTFrame.exe)
+   Licence: MIT
+   Project: https://github.com/jchv/go-webview2
+   A patched copy is vendored in third_party/go-webview2; the patch allows
+   embedding the WebView2 controller in YTFrame's own borderless window.
+
+5. Microsoft Edge WebView2 Loader / Runtime
+   The WebView2Loader DLL is embedded via go-webview2/go-winloader.
+   The WebView2 Runtime itself is a system component and is not distributed
+   with YTFrame. https://developer.microsoft.com/microsoft-edge/webview2/

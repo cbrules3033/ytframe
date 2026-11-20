@@ -6,8 +6,8 @@ cd "$(dirname "$0")/.."
 VERSION=$(sed -n 's/^const appVersion = "\(.*\)"/\1/p' cmd/ytframe/settings.go)
 DIST=dist/YTFrame-win64
 
-if [[ ! -f vendor/mpv.exe || ! -f vendor/yt-dlp.exe ]]; then
-  echo "vendor/mpv.exe and vendor/yt-dlp.exe are required (see SOURCES.txt)" >&2
+if [[ ! -f bundle/mpv.exe || ! -f bundle/yt-dlp.exe ]]; then
+  echo "bundle/mpv.exe and bundle/yt-dlp.exe are required (see SOURCES.txt)" >&2
   exit 1
 fi
 
@@ -19,7 +19,7 @@ CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build \
   -ldflags "-H windowsgui -s -w" \
   -o "$DIST/YTFrame.exe" ./cmd/ytframe
 
-cp vendor/mpv.exe vendor/yt-dlp.exe "$DIST/"
+cp bundle/mpv.exe bundle/yt-dlp.exe "$DIST/"
 cp README.txt LICENSES.txt SOURCES.txt LICENSE LICENSE.GPL-2.0 "$DIST/"
 
 (

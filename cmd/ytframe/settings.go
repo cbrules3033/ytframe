@@ -11,28 +11,57 @@ import (
 	"time"
 )
 
-const appVersion = "1.1.0"
+const appVersion = "1.2.0"
+
+const layoutSlots = 5
+
+type Layout struct {
+	Used    bool  `json:"used"`
+	X       int32 `json:"x"`
+	Y       int32 `json:"y"`
+	Width   int32 `json:"width"`
+	Height  int32 `json:"height"`
+	BarX    int32 `json:"bar_x"`
+	BarY    int32 `json:"bar_y"`
+	BarSet  bool  `json:"bar_set"`
+	SavedAt int64 `json:"saved_at"`
+}
 
 type Settings struct {
-	LastURL      string `json:"last_url"`
-	X            int32  `json:"x"`
-	Y            int32  `json:"y"`
-	Width        int32  `json:"width"`
-	Height       int32  `json:"height"`
-	HasRect      bool   `json:"has_rect"`
-	Volume       int    `json:"volume"`
-	Ontop        bool   `json:"ontop"`
-	Resume       bool   `json:"resume"`
-	Quality      string `json:"quality"`
-	SponsorBlock bool   `json:"sponsor_block"`
-	Controls     bool   `json:"controls"`
-	ExtraArgs    string `json:"extra_args,omitempty"`
+	LastURL       string              `json:"last_url"`
+	X             int32               `json:"x"`
+	Y             int32               `json:"y"`
+	Width         int32               `json:"width"`
+	Height        int32               `json:"height"`
+	HasRect       bool                `json:"has_rect"`
+	Volume        int                 `json:"volume"`
+	Ontop         bool                `json:"ontop"`
+	Resume        bool                `json:"resume"`
+	Quality       string              `json:"quality"`
+	SponsorBlock  bool                `json:"sponsor_block"`
+	Controls      bool                `json:"controls"`
+	VideoMode     string              `json:"video_mode"`
+	BarVisible    bool                `json:"bar_visible"`
+	BarOntop      bool                `json:"bar_ontop"`
+	BarX          int32               `json:"bar_x"`
+	BarY          int32               `json:"bar_y"`
+	BarHasPos     bool                `json:"bar_has_pos"`
+	Layouts       [layoutSlots]Layout `json:"layouts"`
+	DefaultLayout int                 `json:"default_layout"`
+	BrowseX       int32               `json:"browse_x"`
+	BrowseY       int32               `json:"browse_y"`
+	BrowseWidth   int32               `json:"browse_width"`
+	BrowseHeight  int32               `json:"browse_height"`
+	BrowseHasRect bool                `json:"browse_has_rect"`
+	ExtraArgs     string              `json:"extra_args,omitempty"`
 }
 
 func defaultSettings() Settings {
 	return Settings{
 		Width: 960, Height: 540, Volume: 100,
-		Resume: true, Quality: "best", SponsorBlock: true, Controls: true,
+		Resume: true, Quality: "best", SponsorBlock: true, Controls: false,
+		VideoMode: "auto", BarVisible: true, BarOntop: true,
+		DefaultLayout: -1, BrowseWidth: 1200, BrowseHeight: 800,
 	}
 }
 
@@ -80,6 +109,17 @@ func loadSettings() Settings {
 	case "best", "1080", "720", "480":
 	default:
 		s.Quality = "best"
+	}
+	switch s.VideoMode {
+	case "auto", "visible", "hidden":
+	default:
+		s.VideoMode = "auto"
+	}
+	if s.DefaultLayout < -1 || s.DefaultLayout >= layoutSlots {
+		s.DefaultLayout = -1
+	}
+	if s.BrowseWidth < 640 || s.BrowseHeight < 480 {
+		s.BrowseWidth, s.BrowseHeight = 1200, 800
 	}
 	return s
 }

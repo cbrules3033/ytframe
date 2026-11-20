@@ -91,23 +91,102 @@ type App struct {
 
 	updateResult string
 	pollCount    int
+
+	cbHwnd    uintptr
+	cbVisible bool
+	cbReady   bool
+
+	cbFontBody  uintptr
+	cbFontSmall uintptr
+	cbFontTime  uintptr
+	cbBrBg      uintptr
+	cbBrPanel   uintptr
+	cbBrHover   uintptr
+	cbBrAccent  uintptr
+	cbBrIcon    uintptr
+	cbPenBorder uintptr
+	cbPenIcon   uintptr
+	cbPenMuted  uintptr
+	cbPenAccent uintptr
+
+	cbBackDC  uintptr
+	cbBackBmp uintptr
+	cbBackW   int32
+	cbBackH   int32
+
+	cbSeekRect    RECT
+	cbTimeRect    RECT
+	cbVolRect     RECT
+	cbBtn         [cbBtnCount]RECT
+	cbHover       int
+	cbPress       int
+	cbDrag        bool
+	cbDragStart   POINT
+	cbDragRect    RECT
+	cbSeekDrag    bool
+	cbSeekTarget  float64
+	cbVolDrag     bool
+	cbStatus      string
+	cbStatusUntil time.Time
+	cbLastPause   bool
+	cbLastPos     float64
+	cbLastDur     float64
+	cbLastVol     int
+	cbLastMute    bool
+	videoHidden   bool
+	pendingLayout int
+
+	browseOpen bool
+	browseCmd  *exec.Cmd
+	browsePid  int
 }
 
 func main() {
 	runtime.LockOSThread()
 	initDPI()
 
+	if hasArg("--webview-version") {
+		fmt.Println(webviewVersion())
+		return
+	}
+
 	dataDirPath = dataDir()
 	initLog()
 	defer closeLog()
+
+	if hasArg("--browse") {
+		runBrowse()
+		return
+	}
 
 	app = &App{dir: dataDirPath}
 	app.settings = loadSettings()
 	app.history = loadHistory()
 	app.sponsor = newSponsorClient()
 	app.scale = float64(systemDPI()) / 96.0
+	if d := app.settings.DefaultLayout; d >= 0 && d < layoutSlots && app.settings.Layouts[d].Used {
+		l := app.settings.Layouts[d]
+		app.settings.X, app.settings.Y = l.X, l.Y
+		app.settings.Width, app.settings.Height = l.Width, l.Height
+		app.settings.HasRect = true
+		if l.BarSet {
+			app.settings.BarX, app.settings.BarY = l.BarX, l.BarY
+			app.settings.BarHasPos = true
+		}
+		logf("default layout %d applied", d+1)
+	}
 
-	// Single instance.
+	// Single instance: an existing helper window is the most reliable test.
+	if target, _, _ := pFindWindowW.Call(uintptr(unsafe.Pointer(u16("YTFrameHelper"))), 0); target != 0 {
+		if u, ok := urlArg(); ok {
+			sendCopyData(target, u)
+		} else {
+			pPostMessageW.Call(target, WM_APP_SHOWBAR, 0, 0)
+		}
+		logf("second instance handed off to existing window")
+		return
+	}
+
 	name := u16(`Local\YTFrameSingleInstance`)
 	h, _, lastErr := pCreateMutexW.Call(0, 0, uintptr(unsafe.Pointer(name)))
 	mutexHandle = h
@@ -170,25 +249,31 @@ var helperProcCB = syscall.NewCallback(func(hwnd, msg, wparam, lparam uintptr) u
 		a.onTray(lparam)
 		return 0
 	case WM_HOTKEY:
-		switch wparam {
-		case HK_PASTE:
+		switch {
+		case wparam == HK_PASTE:
 			a.showBar()
-		case HK_PLAY:
+		case wparam == HK_PLAY:
 			if p := a.player; p != nil {
 				p.togglePause()
 			}
-		case HK_BACK:
+		case wparam == HK_BACK:
 			if p := a.player; p != nil {
 				p.seekRelative(-10)
 			}
-		case HK_FWD:
+		case wparam == HK_FWD:
 			if p := a.player; p != nil {
 				p.seekRelative(10)
 			}
-		case HK_MUTE:
+		case wparam == HK_MUTE:
 			if p := a.player; p != nil {
 				p.toggleMute()
 			}
+		case wparam == HK_BAR:
+			a.toggleControlBar()
+		case wparam >= HK_LAYOUT && wparam < HK_LAYOUT+layoutSlots:
+			a.applyLayout(int(wparam - HK_LAYOUT))
+		case wparam >= HK_LAYOUT_SAVE && wparam < HK_LAYOUT_SAVE+layoutSlots:
+			a.saveLayout(int(wparam - HK_LAYOUT_SAVE))
 		}
 		return 0
 	case WM_APP_SHOWBAR:
@@ -208,6 +293,9 @@ var helperProcCB = syscall.NewCallback(func(hwnd, msg, wparam, lparam uintptr) u
 		return 0
 	case WM_APP_SNAP:
 		pSetTimer.Call(helperHwnd, TIMER_SNAP, 150, 0)
+		return 0
+	case WM_APP_BROWSEEXIT:
+		a.onBrowseExit()
 		return 0
 	case WM_APP_UPDATEDONE:
 		msg := a.updateResult
@@ -251,6 +339,7 @@ func (a *App) createHelperWindow() {
 	helperHwnd = hwnd
 	pSetTimer.Call(hwnd, TIMER_POLL, 2000, 0)
 	pSetTimer.Call(hwnd, TIMER_SPONSOR, 500, 0)
+	pSetTimer.Call(hwnd, TIMER_BAR, 250, 0)
 }
 
 func (a *App) createTray() {
@@ -282,19 +371,28 @@ func (a *App) removeTray() {
 }
 
 func (a *App) registerHotkey() {
-	keys := []struct {
+	type hk struct {
 		id  uintptr
 		vk  uintptr
+		mod uintptr
 		key string
-	}{
-		{HK_PASTE, VK_V, "V"},
-		{HK_PLAY, VK_SPACE, "Space"},
-		{HK_BACK, VK_J, "J"},
-		{HK_FWD, VK_L, "L"},
-		{HK_MUTE, VK_M, "M"},
+	}
+	keys := []hk{
+		{HK_PASTE, VK_V, MOD_CONTROL | MOD_ALT, "V"},
+		{HK_PLAY, VK_SPACE, MOD_CONTROL | MOD_ALT, "Space"},
+		{HK_BACK, VK_J, MOD_CONTROL | MOD_ALT, "J"},
+		{HK_FWD, VK_L, MOD_CONTROL | MOD_ALT, "L"},
+		{HK_MUTE, VK_M, MOD_CONTROL | MOD_ALT, "M"},
+		{HK_BAR, VK_B, MOD_CONTROL | MOD_ALT, "B"},
+	}
+	for i := 0; i < layoutSlots; i++ {
+		keys = append(keys,
+			hk{HK_LAYOUT + uintptr(i), VK_1 + uintptr(i), MOD_CONTROL | MOD_ALT, fmt.Sprintf("%d", i+1)},
+			hk{HK_LAYOUT_SAVE + uintptr(i), VK_1 + uintptr(i), MOD_CONTROL | MOD_ALT | MOD_SHIFT, "Shift+" + fmt.Sprintf("%d", i+1)},
+		)
 	}
 	for _, k := range keys {
-		r, _, _ := pRegisterHotKey.Call(helperHwnd, k.id, MOD_CONTROL|MOD_ALT, k.vk)
+		r, _, _ := pRegisterHotKey.Call(helperHwnd, k.id, k.mod, k.vk)
 		if r == 0 {
 			logf("global hotkey Ctrl+Alt+%s could not be registered", k.key)
 		}
@@ -337,7 +435,6 @@ func (a *App) showTrayMenu() {
 	if hasPlayer {
 		st = a.player.snapshot()
 	}
-
 	add := func(flags uintptr, id int, text string) {
 		pAppendMenuW.Call(menu, flags, uintptr(id), uintptr(unsafe.Pointer(u16(text))))
 	}
@@ -355,6 +452,9 @@ func (a *App) showTrayMenu() {
 	}
 
 	add(MF_STRING, 100, "Paste link…\tCtrl+Alt+V")
+	add(MF_STRING, 140, "Browse YouTube…")
+	add(MF_STRING, 141, "Clear YouTube browsing data")
+	sep()
 	pauseLabel := "Play/Pause"
 	if hasPlayer && st.Pause {
 		pauseLabel = "Play"
@@ -389,13 +489,30 @@ func (a *App) showTrayMenu() {
 			cur = 203
 		}
 		pCheckMenuRadioItem.Call(qmenu, 200, 203, uintptr(cur), MF_BYCOMMAND)
-		pAppendMenuW.Call(menu, MF_POPUP|MF_STRING, qmenu,
-			uintptr(unsafe.Pointer(u16("Quality"))))
+		pAppendMenuW.Call(menu, MF_POPUP|MF_STRING, qmenu, uintptr(unsafe.Pointer(u16("Quality"))))
 	}
 
-	add(check(a.settings.Resume), 110, "Resume playback")
-	add(check(a.settings.SponsorBlock), 111, "SponsorBlock")
-	add(check(a.settings.Controls), 112, "Show controls on hover")
+	if vmenu, _, _ := pCreatePopupMenu.Call(); vmenu != 0 {
+		vadd := func(id int, text, mode string) {
+			flags := uintptr(MF_STRING)
+			if a.settings.VideoMode == mode {
+				flags |= MF_CHECKED
+			}
+			pAppendMenuW.Call(vmenu, flags, uintptr(id), uintptr(unsafe.Pointer(u16(text))))
+		}
+		vadd(120, "Show always", "visible")
+		vadd(121, "Hide on pause", "auto")
+		vadd(122, "Always hidden (audio only)", "hidden")
+		pAppendMenuW.Call(menu, MF_POPUP|MF_STRING, vmenu, uintptr(unsafe.Pointer(u16("Video"))))
+	}
+
+	add(check(a.settings.BarVisible), 112, "Control bar")
+	add(check(a.settings.Controls), 115, "In-video controls")
+
+	if lmenu, _, _ := pCreatePopupMenu.Call(); lmenu != 0 {
+		a.buildLayoutsMenu(lmenu)
+		pAppendMenuW.Call(menu, MF_POPUP|MF_STRING, lmenu, uintptr(unsafe.Pointer(u16("Layouts"))))
+	}
 	sep()
 
 	ontop := a.settings.Ontop
@@ -406,10 +523,13 @@ func (a *App) showTrayMenu() {
 	if hasPlayer && st.Fullscreen {
 		fsLabel = "Exit fullscreen"
 	}
-	add(check(ontop), 104, "Always on top")
+	add(check(ontop), 104, "Always on top (video)")
 	add(base, 105, fsLabel)
 	sep()
 
+	add(check(a.settings.Resume), 110, "Resume playback")
+	add(check(a.settings.SponsorBlock), 111, "SponsorBlock")
+	sep()
 	add(MF_STRING, 106, "Update yt-dlp")
 	add(MF_STRING, 107, "Open log")
 	add(MF_STRING, 114, "Controls…")
@@ -480,9 +600,23 @@ func (a *App) onMenuCommand(id int) {
 		a.lastSkipEnd = 0
 		saveSettings(a.settings)
 	case id == 112:
-		a.setControls(!a.settings.Controls)
+		a.setControlBarVisible(!a.settings.BarVisible)
 	case id == 114:
 		a.showControlsHelp()
+	case id == 115:
+		a.setControls(!a.settings.Controls)
+	case id == 116:
+		a.setBarOntop(!a.settings.BarOntop)
+	case id == 120:
+		a.setVideoMode("visible")
+	case id == 121:
+		a.setVideoMode("auto")
+	case id == 122:
+		a.setVideoMode("hidden")
+	case id == 140:
+		a.openBrowse()
+	case id == 141:
+		a.clearBrowseData()
 	case id >= 200 && id <= 203:
 		q := "best"
 		switch id {
@@ -494,6 +628,14 @@ func (a *App) onMenuCommand(id int) {
 			q = "480"
 		}
 		a.switchQuality(q)
+	case id >= 300 && id <= 304:
+		a.applyLayout(id - 300)
+	case id >= 310 && id <= 314:
+		a.saveLayout(id - 310)
+	case id >= 320 && id <= 324:
+		a.setDefaultLayout(id - 320)
+	case id == 330:
+		a.clearLayouts()
 	}
 }
 
@@ -581,6 +723,7 @@ func (a *App) showBarWith(prefill, status string, statusErr bool) {
 			a.pausedByBar = true
 		}
 	}
+	a.applyVideoVisibility()
 }
 
 func (a *App) hideBar(resume bool) {
@@ -589,6 +732,7 @@ func (a *App) hideBar(resume bool) {
 	}
 	pShowWindow.Call(a.barHwnd, SW_HIDE)
 	a.barVisible = false
+	wasPausedByBar := a.pausedByBar
 	if resume && a.pausedByBar {
 		if p := a.player; p != nil {
 			p.pauseSet(false)
@@ -599,6 +743,9 @@ func (a *App) hideBar(resume bool) {
 		if hw := p.hwndNow(); hw != 0 {
 			pSetForegroundWindow.Call(hw)
 		}
+	}
+	if !(resume && wasPausedByBar) {
+		a.applyVideoVisibility()
 	}
 }
 
@@ -700,6 +847,7 @@ func (a *App) startPlayback(raw string, showBarIfError bool) {
 }
 
 func (a *App) startPlayer(u string, startSec int) error {
+	a.videoHidden = false
 	p := newPlayer(a)
 	if err := p.start(u, startSec); err != nil {
 		return err
@@ -740,6 +888,10 @@ func (a *App) handleLoaded(id int) {
 		a.lastSkipEnd = 0
 		a.refreshTrayTitle()
 		a.trackPosition()
+		if a.settings.BarVisible && !a.browseOpen {
+			a.showControlBar()
+		}
+		a.applyVideoVisibility()
 	}
 	pSetTimer.Call(helperHwnd, TIMER_SNAP, 250, 0)
 }
@@ -814,6 +966,9 @@ func (a *App) handleMPVExit(id int) {
 	a.segments = nil
 	a.pendingPause = false
 	a.pendingFullscreen = false
+	a.pendingLayout = -1
+	a.videoHidden = false
+	a.hideControlBar()
 	a.player = nil
 	if wasLoading || a.barVisible {
 		a.showBarWith(a.settings.LastURL, "The player closed. Press Enter to try again.", true)
@@ -839,6 +994,15 @@ func (a *App) onTimer(id uintptr) {
 		}
 	case TIMER_SPONSOR:
 		a.sponsorTick()
+	case TIMER_BAR:
+		a.cbTick()
+	case TIMER_LAYOUT:
+		pKillTimer.Call(helperHwnd, TIMER_LAYOUT)
+		if a.pendingLayout >= 0 {
+			i := a.pendingLayout
+			a.pendingLayout = -1
+			a.applyLayoutNow(i)
+		}
 	case TIMER_SNAP:
 		pKillTimer.Call(helperHwnd, TIMER_SNAP)
 		a.snapAspect()
@@ -1008,9 +1172,20 @@ func (a *App) onCopyData(lparam uintptr) {
 	}
 	b := unsafe.Slice((*byte)(unsafe.Pointer(cds.LpData)), cds.CbData)
 	s := strings.TrimRight(string(b), "\x00")
-	if s != "" {
-		a.startPlayback(s, true)
+	if s == "" {
+		return
 	}
+	if cds.DwData == 2 {
+		var x, y, w, h int32
+		if _, err := fmt.Sscanf(s, "%d,%d,%d,%d", &x, &y, &w, &h); err == nil {
+			a.settings.BrowseX, a.settings.BrowseY = x, y
+			a.settings.BrowseWidth, a.settings.BrowseHeight = w, h
+			a.settings.BrowseHasRect = true
+			saveSettings(a.settings)
+		}
+		return
+	}
+	a.startPlayback(s, true)
 }
 
 // ---- misc ----------------------------------------------------------------
@@ -1080,9 +1255,13 @@ func (a *App) requestExit() {
 		a.player = nil
 	}
 	a.removeTray()
+	if h, _, _ := pFindWindowW.Call(uintptr(unsafe.Pointer(u16("YTFrameBrowseHost"))), 0); h != 0 {
+		pPostMessageW.Call(h, WM_CLOSE, 0, 0)
+	}
 	for hk := uintptr(HK_PASTE); hk <= HK_LAST; hk++ {
 		pUnregisterHotKey.Call(helperHwnd, hk)
 	}
+	a.cbFreeGDI()
 	if a.barHwnd != 0 {
 		pDestroyWindow.Call(a.barHwnd)
 		a.barHwnd = 0

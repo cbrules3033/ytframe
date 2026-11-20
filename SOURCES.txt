@@ -15,3 +15,13 @@ yt-dlp
 
 YTFrame
   source:   https://github.com/cbrules3033/ytframe
+
+go-webview2
+  source:  https://github.com/jchv/go-webview2
+  licence: MIT
+  note:    vendored and patched under third_party/go-webview2
+
+WebView2Loader
+  source:  Microsoft WebView2 SDK / go-winloader
+  note:    embedded in YTFrame.exe; runtime is installed by Windows/Edge
+go-webview2 commit: 56598839c808a2340edee99204db479f410e9bf4
