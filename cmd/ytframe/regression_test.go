@@ -6,34 +6,37 @@ import (
 	"encoding/json"
 	"math"
 	"runtime"
+	"strconv"
 	"testing"
 	"unsafe"
 )
 
 func TestLoadAtTimestampUsesCurrentMPVProtocol(t *testing.T) {
-	p := &Player{cmdCh: make(chan []byte, 8), duration: 120, hasDuration: true, eofPosted: true}
-	p.load("https://youtu.be/abcdefghijk", 42)
-	var message struct {
-		Command []json.RawMessage `json:"command"`
-	}
-	if err := json.Unmarshal(<-p.cmdCh, &message); err != nil {
-		t.Fatal(err)
-	}
-	if len(message.Command) != 5 {
-		t.Fatalf("loadfile needs URL, flags, index, and options: %s", message.Command)
-	}
-	if string(message.Command[3]) != "-1" {
-		t.Fatalf("options are in the insertion-index position: %s", message.Command)
-	}
-	var options map[string]string
-	if err := json.Unmarshal(message.Command[4], &options); err != nil {
-		t.Fatal(err)
-	}
-	if options["start"] != "42" {
-		t.Fatalf("wrong start: %v", options)
-	}
-	if p.snapshot().HasDuration || p.snapshot().Duration != 0 || p.eofPosted {
-		t.Fatal("previous video's duration/EOF leaked into new load")
+	for _, start := range []int{0, 42} {
+		p := &Player{cmdCh: make(chan []byte, 8), duration: 120, hasDuration: true, eofPosted: true}
+		p.load("https://youtu.be/abcdefghijk", start)
+		var message struct {
+			Command []json.RawMessage `json:"command"`
+		}
+		if err := json.Unmarshal(<-p.cmdCh, &message); err != nil {
+			t.Fatal(err)
+		}
+		if len(message.Command) != 5 {
+			t.Fatalf("loadfile needs URL, flags, index, and options: %s", message.Command)
+		}
+		if string(message.Command[3]) != "-1" {
+			t.Fatalf("options are in the insertion-index position: %s", message.Command)
+		}
+		var options map[string]string
+		if err := json.Unmarshal(message.Command[4], &options); err != nil {
+			t.Fatal(err)
+		}
+		if options["start"] != strconv.Itoa(start) {
+			t.Fatalf("wrong start: %v", options)
+		}
+		if p.snapshot().HasDuration || p.snapshot().Duration != 0 || p.eofPosted {
+			t.Fatal("previous video's duration/EOF leaked into new load")
+		}
 	}
 }
 

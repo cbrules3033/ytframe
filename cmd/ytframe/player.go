@@ -424,11 +424,9 @@ func (p *Player) load(url string, startSec int) {
 	p.hasDuration = false
 	p.mu.Unlock()
 
-	if startSec > 0 {
-		p.command("loadfile", url, "replace", -1, map[string]string{"start": fmt.Sprint(startSec)})
-	} else {
-		p.command("loadfile", url, "replace")
-	}
+	// Always override --start, including zero, so the previous video's
+	// command-line resume offset cannot leak into the next load.
+	p.command("loadfile", url, "replace", -1, map[string]string{"start": fmt.Sprint(startSec)})
 	p.command("set_property", "pause", false)
 	logf("loading %s", url)
 }
