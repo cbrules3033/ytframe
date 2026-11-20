@@ -19,7 +19,7 @@ import (
 
 const (
 	browseClass    = "YTFrameBrowseHost"
-	browseToolbarH = 40
+	browseToolbarH = 52
 	browseHome     = "https://www.youtube.com/"
 )
 
@@ -123,8 +123,7 @@ func runBrowse() {
 	if x, y, ww, hh, ok := browseRectFromArgs(); ok {
 		r := RECT{Left: x, Top: y, Right: x + ww, Bottom: y + hh}
 		work := workAreaAt(x+ww/2, y+hh/2)
-		r.Left = clamp(r.Left, work.Left, work.Right-rectW(r))
-		r.Top = clamp(r.Top, work.Top, work.Bottom-rectH(r))
+		r = fitWindowRect(r, work)
 		pSetWindowPos.Call(bw.hwnd, 0, uintptr(r.Left), uintptr(r.Top),
 			uintptr(rectW(r)), uintptr(rectH(r)), SWP_NOZORDER|SWP_NOACTIVATE)
 	}
@@ -205,7 +204,7 @@ func (bw *browseWindow) ensureGDI() {
 		)
 		return h
 	}
-	bw.fontBody = mk(11, FW_NORMAL)
+	bw.fontBody = mk(13, FW_NORMAL)
 	bw.fontTitle = mk(16, FW_SEMIBOLD)
 	bw.brBg, _, _ = pCreateSolidBrush.Call(colBg)
 	bw.brPanel, _, _ = pCreateSolidBrush.Call(colField)
@@ -221,6 +220,7 @@ func (bw *browseWindow) createHost() {
 	hInst := getModuleHandle()
 	var wc WNDCLASSEXW
 	wc.CbSize = uint32(unsafe.Sizeof(wc))
+	wc.Style = 0x0008 // CS_DBLCLKS
 	wc.LpfnWndProc = browseProcCB
 	wc.HInstance = hInst
 	wc.HIcon = loadAppIcon()
@@ -549,6 +549,15 @@ func browseWndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 	case WM_CREATE:
 		bw.hwnd = hwnd
 		return 0
+	case WM_DPICHANGED:
+		bw.scale = float64(loword(wparam)) / 96
+		bw.freeGDI()
+		bw.ensureGDI()
+		r := (*RECT)(unsafe.Pointer(lparam))
+		pSetWindowPos.Call(hwnd, 0, uintptr(r.Left), uintptr(r.Top), uintptr(rectW(*r)), uintptr(rectH(*r)), SWP_NOZORDER|SWP_NOACTIVATE)
+		bw.layout()
+		bw.invalidate()
+		return 0
 	case WM_SIZE:
 		bw.layout()
 		bw.invalidate()
@@ -564,7 +573,7 @@ func browseWndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 	case WM_ERASEBKGND:
 		return 1
 	case WM_MOUSEMOVE:
-		x, y := loword(lparam), hiword(lparam)
+		x, y := mouseX(lparam), mouseY(lparam)
 		h := -1
 		for i, r := range bw.btn {
 			if i < bwBtnGet && pointIn(r, x, y) {
@@ -614,7 +623,7 @@ func browseWndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 			return 1
 		}
 	case WM_LBUTTONDOWN:
-		x, y := loword(lparam), hiword(lparam)
+		x, y := mouseX(lparam), mouseY(lparam)
 		for i, r := range bw.btn {
 			if i < bwBtnGet && pointIn(r, x, y) {
 				bw.press = i
@@ -643,7 +652,7 @@ func browseWndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 		}
 		return 0
 	case WM_LBUTTONUP:
-		x, y := loword(lparam), hiword(lparam)
+		x, y := mouseX(lparam), mouseY(lparam)
 		if bw.press >= 0 {
 			p := bw.press
 			bw.press = -1
@@ -661,14 +670,50 @@ func browseWndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 			bw.toggleMax()
 		}
 		return 0
+	case WM_CAPTURECHANGED, WM_CANCELMODE:
+		bw.press = -1
+		bw.invalidate()
+		return 0
+	case 0x0083: // WM_NCCALCSIZE: keep the custom browser chrome borderless.
+		return 0
+	case 0x0084: // WM_NCHITTEST: retain edge/corner resizing.
+		var rc RECT
+		pGetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&rc)))
+		x, y := mouseX(lparam)-rc.Left, mouseY(lparam)-rc.Top
+		if !bw.maxed {
+			d := int32(6 * bw.scale)
+			left, right := x < d, x >= rectW(rc)-d
+			top, bottom := y < d, y >= rectH(rc)-d
+			switch {
+			case top && left:
+				return 13
+			case top && right:
+				return 14
+			case bottom && left:
+				return 16
+			case bottom && right:
+				return 17
+			case left:
+				return 10
+			case right:
+				return 11
+			case top:
+				return 12
+			case bottom:
+				return 15
+			}
+		}
+		return 1 // HTCLIENT
 	case WM_GETMINMAXINFO:
-		// Leave the default sizing to Windows; a minimum is enforced at creation.
-		break
+		mm := (*MINMAXINFO)(unsafe.Pointer(lparam))
+		mm.MinTrackSize = POINT{X: int32(640 * bw.scale), Y: int32(480 * bw.scale)}
+		return 0
 	case WM_CLOSE:
 		bw.saveRect()
 		pDestroyWindow.Call(hwnd)
 		return 0
 	case WM_DESTROY:
+		bw.freeGDI()
 		pPostQuitMessage.Call(0)
 		return 0
 	}
@@ -707,7 +752,7 @@ func runWebviewVersionCheck() string {
 
 func browsePlay(u string) {
 	u = strings.TrimSpace(u)
-	if u == "" {
+	if youtubeID(u) == "" {
 		return
 	}
 	target, _, _ := pFindWindowW.Call(uintptr(unsafe.Pointer(u16("YTFrameHelper"))), 0)
@@ -758,6 +803,7 @@ const browseInitJS = `
     if (!a) return;
     try {
       var u = new URL(a.href, location.href);
+      if (!/^(www\.|m\.|music\.)?youtube\.com$/.test(u.hostname)) return;
       if ((u.pathname === '/watch' && u.searchParams.get('v')) ||
           u.pathname.indexOf('/shorts/') === 0) {
         e.preventDefault();
@@ -769,7 +815,7 @@ const browseInitJS = `
 
   window.addEventListener('yt-navigate-finish', function () {
     try {
-      if (location.pathname === '/watch' && new URLSearchParams(location.search).get('v')) {
+      if ((location.pathname === '/watch' && new URLSearchParams(location.search).get('v')) || location.pathname.indexOf('/shorts/') === 0) {
         send(location.href);
       }
     } catch (e) {}
@@ -856,4 +902,13 @@ func (a *App) clearBrowseData() {
 	a.settings.BrowseHasRect = false
 	saveSettings(a.settings)
 	messageBox(0, "YouTube browsing data cleared.", "YTFrame", MB_OK|MB_ICONINFORMATION)
+}
+
+func (bw *browseWindow) freeGDI() {
+	for _, h := range []uintptr{bw.fontBody, bw.fontTitle, bw.brBg, bw.brPanel, bw.brHover, bw.brAccent, bw.brText, bw.penBorder, bw.penIcon, bw.penMuted} {
+		if h != 0 {
+			pDeleteObject.Call(h)
+		}
+	}
+	bw.fontBody = 0
 }

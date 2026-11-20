@@ -1,4 +1,4 @@
-YTFrame 1.2.0
+YTFrame 1.3.0
 =============
 
 A borderless, video-only YouTube window with a floating control bar and a
@@ -138,3 +138,15 @@ LICENCES
 YTFrame is MIT. mpv is GPLv2+; yt-dlp is Unlicense; go-webview2 is MIT.
 See LICENSES.txt and LICENSE.GPL-2.0. Versions and source links are in
 SOURCES.txt.
+
+WHAT IS NEW IN 1.3
+------------------
+A redesigned launcher with a Browse YouTube button and Tab/Shift+Tab navigation.
+A clearer remote with the current title, larger controls and hover hints.
+Fixes for timestamp reloads, slider drags, monitor restoration, DPI changes
+and read-only program folders. Up/Down now adjust volume as documented.
+
+CODE SIGNING POLICY
+-------------------
+This build is unsigned. See CODE_SIGNING.txt for the release policy and
+free open-source signing setup. Signing provider approval is still required.

@@ -34,6 +34,7 @@ var (
 	pAllowSetForegroundWindow = user32.NewProc("AllowSetForegroundWindow")
 	pGetForegroundWindow      = user32.NewProc("GetForegroundWindow")
 	pSetFocus                 = user32.NewProc("SetFocus")
+	pGetKeyState              = user32.NewProc("GetKeyState")
 	pGetFocus                 = user32.NewProc("GetFocus")
 	pSendMessageW             = user32.NewProc("SendMessageW")
 	pPostMessageW             = user32.NewProc("PostMessageW")
@@ -175,49 +176,58 @@ const (
 	SWP_SHOWWINDOW   = 0x0040
 	SWP_HIDEWINDOW   = 0x0080
 
-	WM_DESTROY       = 0x0002
-	WM_CREATE        = 0x0001
-	WM_SIZE          = 0x0005
-	WM_GETMINMAXINFO = 0x0024
-	WM_ACTIVATE      = 0x0006
-	WM_PAINT         = 0x000F
-	WM_CLOSE         = 0x0010
-	WM_TIMER         = 0x0113
-	WM_KEYDOWN       = 0x0100
-	WM_CHAR          = 0x0102
-	WM_COMMAND       = 0x0111
-	WM_CTLCOLOREDIT  = 0x0133
-	WM_MOUSEMOVE     = 0x0200
-	WM_LBUTTONDOWN   = 0x0201
-	WM_LBUTTONUP     = 0x0202
-	WM_LBUTTONDBLCLK = 0x0203
-	WM_RBUTTONUP     = 0x0205
-	WM_MOUSEWHEEL    = 0x020A
-	WM_CONTEXTMENU   = 0x007B
-	WM_SETCURSOR     = 0x0020
-	WM_MOUSELEAVE    = 0x02A3
-	WM_DPICHANGED    = 0x02E0
-	WM_HOTKEY        = 0x0312
-	WM_COPYDATA      = 0x004A
-	WM_NCLBUTTONDOWN = 0x00A1
-	WM_NULL          = 0x0000
-	WM_ERASEBKGND    = 0x0014
+	WM_DESTROY        = 0x0002
+	WM_CAPTURECHANGED = 0x0215
+	WM_CANCELMODE     = 0x001F
+	WM_SETFOCUS       = 0x0007
+	WM_KILLFOCUS      = 0x0008
+	EM_SETLIMITTEXT   = 0x00C5
+	WM_CREATE         = 0x0001
+	WM_SIZE           = 0x0005
+	WM_GETMINMAXINFO  = 0x0024
+	WM_ACTIVATE       = 0x0006
+	WM_PAINT          = 0x000F
+	WM_CLOSE          = 0x0010
+	WM_TIMER          = 0x0113
+	WM_KEYDOWN        = 0x0100
+	WM_CHAR           = 0x0102
+	WM_COMMAND        = 0x0111
+	WM_CTLCOLOREDIT   = 0x0133
+	WM_MOUSEMOVE      = 0x0200
+	WM_LBUTTONDOWN    = 0x0201
+	WM_LBUTTONUP      = 0x0202
+	WM_LBUTTONDBLCLK  = 0x0203
+	WM_RBUTTONUP      = 0x0205
+	WM_MOUSEWHEEL     = 0x020A
+	WM_CONTEXTMENU    = 0x007B
+	WM_SETCURSOR      = 0x0020
+	WM_MOUSELEAVE     = 0x02A3
+	WM_DPICHANGED     = 0x02E0
+	WM_HOTKEY         = 0x0312
+	WM_COPYDATA       = 0x004A
+	WM_NCLBUTTONDOWN  = 0x00A1
+	WM_NULL           = 0x0000
+	WM_ERASEBKGND     = 0x0014
 
 	HTCAPTION = 2
 
-	VK_RETURN = 0x0D
-	VK_ESCAPE = 0x1B
-	VK_SPACE  = 0x20
-	VK_J      = 0x4A
-	VK_L      = 0x4C
-	VK_M      = 0x4D
-	VK_V      = 0x56
-	VK_B      = 0x42
-	VK_1      = 0x31
-	VK_2      = 0x32
-	VK_3      = 0x33
-	VK_4      = 0x34
-	VK_5      = 0x35
+	VK_A       = 0x41
+	VK_CONTROL = 0x11
+	VK_TAB     = 0x09
+	VK_SHIFT   = 0x10
+	VK_RETURN  = 0x0D
+	VK_ESCAPE  = 0x1B
+	VK_SPACE   = 0x20
+	VK_J       = 0x4A
+	VK_L       = 0x4C
+	VK_M       = 0x4D
+	VK_V       = 0x56
+	VK_B       = 0x42
+	VK_1       = 0x31
+	VK_2       = 0x32
+	VK_3       = 0x33
+	VK_4       = 0x34
+	VK_5       = 0x35
 
 	MOD_ALT     = 0x0001
 	MOD_CONTROL = 0x0002
@@ -310,6 +320,7 @@ const (
 	WM_APP_UPDATEDONE  = WM_APP + 7
 	WM_APP_SNAP        = WM_APP + 8
 	WM_APP_BROWSEEXIT  = WM_APP + 9
+	WM_APP_PASTE       = WM_APP + 10
 
 	TIMER_POLL     = 1
 	TIMER_SNAP     = 2
@@ -453,7 +464,7 @@ func makeLong(a, b int32) uintptr {
 	return uintptr(uint16(a)) | uintptr(uint16(b))<<16
 }
 
-func procOK(p *syscall.LazyProc) bool { return p.Find() != nil }
+func procOK(p *syscall.LazyProc) bool { return p.Find() == nil }
 
 func getModuleHandle() uintptr {
 	h, _, _ := pGetModuleHandleW.Call(0)
@@ -506,7 +517,7 @@ func monitorWork(hwnd uintptr) RECT {
 }
 
 func workAreaForPoint(pt POINT) RECT {
-	mon, _, _ := pMonitorFromPoint.Call(uintptr(unsafe.Pointer(&pt)), MONITOR_DEFAULTTONEAREST)
+	mon, _, _ := pMonitorFromPoint.Call(packedPoint(pt), MONITOR_DEFAULTTONEAREST)
 	var mi MONITORINFO
 	mi.CbSize = uint32(unsafe.Sizeof(mi))
 	if mon != 0 {
@@ -601,3 +612,24 @@ func sendCopyDataKind(dst uintptr, kind uintptr, payload string) bool {
 	r, _, _ := pSendMessageW.Call(dst, WM_COPYDATA, 0, uintptr(unsafe.Pointer(&cds)))
 	return r != 0
 }
+
+func mouseX(v uintptr) int32 { return int32(int16(loword(v))) }
+func mouseY(v uintptr) int32 { return int32(int16(hiword(v))) }
+
+// fitWindowRect preserves size while bringing restored windows onto a monitor.
+func fitWindowRect(r, work RECT) RECT {
+	w, h := rectW(r), rectH(r)
+	if w > rectW(work) {
+		w = rectW(work)
+	}
+	if h > rectH(work) {
+		h = rectH(work)
+	}
+	x := clamp(r.Left, work.Left, work.Right-w)
+	y := clamp(r.Top, work.Top, work.Bottom-h)
+	return RECT{Left: x, Top: y, Right: x + w, Bottom: y + h}
+}
+
+type MINMAXINFO struct{ Reserved, MaxSize, MaxPosition, MinTrackSize, MaxTrackSize POINT }
+
+func packedPoint(pt POINT) uintptr { return uintptr(uint64(uint32(pt.X)) | uint64(uint32(pt.Y))<<32) }

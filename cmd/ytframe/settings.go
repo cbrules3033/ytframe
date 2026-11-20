@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const appVersion = "1.2.0"
+const appVersion = "1.3.0"
 
 const layoutSlots = 5
 
@@ -75,10 +75,9 @@ func dataDir() string {
 	exe, err := os.Executable()
 	if err == nil {
 		dir := filepath.Dir(exe)
-		test := filepath.Join(dir, ".write-test")
-		if f, err := os.Create(test); err == nil {
+		if f, err := os.CreateTemp(dir, ".ytframe-write-*"); err == nil {
 			f.Close()
-			os.Remove(test)
+			os.Remove(f.Name())
 			return dir
 		}
 	}
@@ -167,4 +166,13 @@ func closeLog() {
 		logFile.Close()
 		logFile = nil
 	}
+}
+
+// Program files stay beside the exe even when mutable data falls back to LocalAppData.
+func bundledPath(name string) string {
+	exe, err := os.Executable()
+	if err != nil {
+		return filepath.Join(dataDirPath, name)
+	}
+	return filepath.Join(filepath.Dir(exe), name)
 }

@@ -66,6 +66,7 @@ type App struct {
 
 	gdiReady      bool
 	fontTitle     uintptr
+	fontBrand     uintptr
 	fontBody      uintptr
 	fontHint      uintptr
 	fontClose     uintptr
@@ -76,13 +77,19 @@ type App struct {
 	penBorder     uintptr
 	penField      uintptr
 	penClose      uintptr
+	penFocus      uintptr
+	penError      uintptr
 
-	btnRect    RECT
-	closeRect  RECT
-	editRect   RECT
-	hoverBtn   bool
-	hoverClose bool
-	pressBtn   bool
+	btnRect       RECT
+	closeRect     RECT
+	editRect      RECT
+	browseRect    RECT
+	hoverBrowse   bool
+	pressBrowse   bool
+	launcherFocus int
+	hoverBtn      bool
+	hoverClose    bool
+	pressBtn      bool
 
 	backDC  uintptr
 	backBmp uintptr
@@ -95,6 +102,7 @@ type App struct {
 	cbHwnd    uintptr
 	cbVisible bool
 	cbReady   bool
+	cbScale   float64
 
 	cbFontBody  uintptr
 	cbFontSmall uintptr
@@ -129,6 +137,7 @@ type App struct {
 	cbStatus      string
 	cbStatusUntil time.Time
 	cbLastPause   bool
+	cbTitle       string
 	cbLastPos     float64
 	cbLastDur     float64
 	cbLastVol     int
@@ -159,7 +168,7 @@ func main() {
 		return
 	}
 
-	app = &App{dir: dataDirPath}
+	app = &App{dir: dataDirPath, pendingLayout: -1}
 	app.settings = loadSettings()
 	app.history = loadHistory()
 	app.sponsor = newSponsorClient()
@@ -274,6 +283,11 @@ var helperProcCB = syscall.NewCallback(func(hwnd, msg, wparam, lparam uintptr) u
 			a.applyLayout(int(wparam - HK_LAYOUT))
 		case wparam >= HK_LAYOUT_SAVE && wparam < HK_LAYOUT_SAVE+layoutSlots:
 			a.saveLayout(int(wparam - HK_LAYOUT_SAVE))
+		}
+		return 0
+	case WM_APP_PASTE:
+		if a.player != nil && a.player.id == int(wparam) {
+			a.startPlayback(clipboardText(), true)
 		}
 		return 0
 	case WM_APP_SHOWBAR:
@@ -653,8 +667,8 @@ func (a *App) createBarWindow() {
 	wc.LpszClassName = u16("YTFrameBar")
 	pRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc)))
 
-	w := int32(640 * a.scale)
-	h := int32(140 * a.scale)
+	w := int32(launcherW * a.scale)
+	h := int32(launcherH * a.scale)
 	hwnd, _, _ := pCreateWindowExW.Call(
 		WS_EX_TOPMOST|WS_EX_TOOLWINDOW,
 		uintptr(unsafe.Pointer(u16("YTFrameBar"))),
@@ -695,8 +709,8 @@ func (a *App) showBarWith(prefill, status string, statusErr bool) {
 	a.status = status
 	a.statusErr = statusErr
 
-	w := int32(640 * a.scale)
-	h := int32(140 * a.scale)
+	w := int32(launcherW * a.scale)
+	h := int32(launcherH * a.scale)
 	var pt POINT
 	pGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
 	work := workAreaForPoint(pt)
@@ -1191,7 +1205,7 @@ func (a *App) onCopyData(lparam uintptr) {
 // ---- misc ----------------------------------------------------------------
 
 func (a *App) updateYtdlp() {
-	path := filepath.Join(dataDirPath, "yt-dlp.exe")
+	path := bundledPath("yt-dlp.exe")
 	if _, err := os.Stat(path); err != nil {
 		messageBox(0, "yt-dlp.exe is missing from the YTFrame folder.", "Update yt-dlp", MB_OK|MB_ICONERROR)
 		return
@@ -1293,7 +1307,7 @@ func (a *App) cleanup() {
 // ---- resume, quality and SponsorBlock ------------------------------------
 
 func (a *App) resumeFor(u string, ts int) int {
-	if ts > 0 {
+	if ts > 0 || hasStartParam(u) {
 		return ts
 	}
 	if !a.settings.Resume {
@@ -1560,14 +1574,8 @@ func (a *App) showControlsHelp() {
 // ---- URL helpers ---------------------------------------------------------
 
 func isPlayableInput(s string) bool {
-	if s == "" {
-		return false
-	}
-	low := strings.ToLower(s)
-	if strings.HasPrefix(low, "http://") || strings.HasPrefix(low, "https://") || strings.HasPrefix(low, "file://") {
-		return true
-	}
-	return isDrivePath(s)
+	_, _, err := normalizeURL(s)
+	return err == ""
 }
 
 func isDrivePath(s string) bool {
@@ -1590,7 +1598,7 @@ func normalizeURL(raw string) (string, int, string) {
 	low := strings.ToLower(s)
 	if !strings.Contains(low, "://") {
 		for _, prefix := range []string{"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"} {
-			if strings.HasPrefix(low, prefix) {
+			if low == prefix || strings.HasPrefix(low, prefix+"/") || strings.HasPrefix(low, prefix+"?") {
 				s = "https://" + s
 				low = strings.ToLower(s)
 				break
@@ -1598,6 +1606,10 @@ func normalizeURL(raw string) (string, int, string) {
 		}
 	}
 	if strings.HasPrefix(low, "http://") || strings.HasPrefix(low, "https://") {
+		u, err := url.Parse(s)
+		if err != nil || u.Hostname() == "" || strings.ContainsAny(u.Host, " \t\r\n") {
+			return "", 0, "That link is incomplete. Paste the full video URL."
+		}
 		return s, startParam(s), ""
 	}
 	if strings.HasPrefix(low, "file://") {
@@ -1617,6 +1629,9 @@ func startParam(raw string) int {
 	v := u.Query().Get("t")
 	if v == "" {
 		v = u.Query().Get("start")
+	}
+	if v == "" {
+		v = strings.TrimPrefix(u.Fragment, "t=")
 	}
 	return parseTime(v)
 }
@@ -1722,4 +1737,15 @@ func workAreaAt(px, py int32) RECT {
 		return mi.RcWork
 	}
 	return RECT{Right: 1280, Bottom: 720}
+}
+
+func hasStartParam(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	q := u.Query()
+	_, t := q["t"]
+	_, start := q["start"]
+	return t || start || strings.HasPrefix(u.Fragment, "t=")
 }

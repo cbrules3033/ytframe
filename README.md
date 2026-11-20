@@ -6,6 +6,8 @@ Paste a link or browse YouTube, click a video, and it plays in a window that is 
 
 **[Download the latest release](https://github.com/cbrules3033/ytframe/releases/latest)** — extract the zip anywhere and run `YTFrame.exe`.
 
+**New in 1.3:** a redesigned launcher with one-click browsing, a clearer remote with the video title and control hints, keyboard navigation, and fixes for timestamp reloads, dragging, monitor restoration and read-only folders.
+
 ![The paste bar](docs/bar.png)
 
 ![The floating control bar](docs/controlbar.png)
@@ -65,7 +67,7 @@ Requirements: Windows 10 or 11, 64-bit. YouTube browsing needs the Microsoft Edg
 
 ## The control bar
 
-The bar is a separate window, so it can be larger than a tiny video and remains readable at any size. It is always on top by default (the pin toggles it) and uses `WS_EX_NOACTIVATE`, so clicking it never steals focus from the video, a fullscreen app, or your work.
+The remote has a title row, a dedicated timeline and generously spaced playback controls. Hover an icon to see its action and shortcut. The bar is a separate window, so it can be larger than a tiny video and remains readable at any size. It is always on top by default (the pin toggles it) and uses `WS_EX_NOACTIVATE`, so clicking it never steals focus from the video, a fullscreen app, or your work.
 
 - The seek line is clickable and draggable; the time updates live.
 - The volume slider is clickable/draggable; the wheel over the bar also adjusts volume.
@@ -88,7 +90,7 @@ Five slots, each storing the video window rect and the control-bar position.
 
 ## YouTube browser
 
-Tray → **Browse YouTube…** opens a borderless custom window with a 40px dark toolbar and the real YouTube site below it. Clicking a video (or Shorts) sends it to the player and closes the browser; the control bar returns.
+Tray → **Browse YouTube…** opens a borderless custom window with a 52px dark toolbar and the real YouTube site below it. Clicking a video (or Shorts) sends it to the player and closes the browser; the control bar returns.
 
 - Back/forward/reload/home buttons; `Alt+←/→` and `Alt+Home` also work.
 - The browse profile is stored in `browse-data/` next to the exe, so logins and cookies survive restarts. Tray → **Clear YouTube browsing data** removes it.
@@ -154,13 +156,26 @@ CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build \
   -o dist/YTFrame-win64/YTFrame.exe ./cmd/ytframe
 ```
 
-`scripts/build.sh` does the full package (build, copy mpv/yt-dlp, zip, checksum). The Windows icon, version info and DPI manifest are compiled from `cmd/ytframe/app.rc` into `rsrc.syso`; that file is committed so the build does not need MinGW. To change the icon or manifest, regenerate it with:
+`scripts/build.sh` does the full package (build, copy mpv/yt-dlp, zip, checksum). On Windows, use `scripts/package.ps1`; it downloads the pinned dependencies and verifies their SHA-256 hashes. Both stage fresh packages under `dist/staging/` so rebuilding does not erase an existing portable installation under `dist/YTFrame-win64/`.
+
+The [Windows build workflow](.github/workflows/windows.yml) runs regression tests and uploads an unsigned ZIP and checksum for each build. To run checks locally on Windows:
+
+```powershell
+go test -count=1 ./cmd/ytframe
+go vet -unsafeptr=false ./cmd/ytframe
+```
+
+The `unsafeptr` analyzer is excluded because Win32 callbacks deliver pointers through `uintptr`. All other vet checks run. The Windows icon, version info and DPI manifest are compiled from `cmd/ytframe/app.rc` into `rsrc.syso`; that file is committed so the build does not need MinGW. To change the icon or manifest, regenerate it with:
 
 ```bash
 x86_64-w64-mingw32-windres -i cmd/ytframe/app.rc -O coff -o cmd/ytframe/rsrc.syso
 ```
 
 The WebView2 wrapper is a small patched copy of [go-webview2](https://github.com/jchv/go-webview2) under `third_party/` (MIT); the patch lets it embed into our own borderless host window. `go-webview2` embeds the WebView2Loader DLL, so no extra files are shipped.
+
+## Code signing policy
+
+Current builds are unsigned. See the [code signing policy and free signing setup](docs/CODE_SIGNING.md) for the project's release policy, dependency disclosures and the SignPath Foundation application details. Signing requires provider approval and maintainer account setup; no approval or signature is claimed.
 
 ## Credits and licences
 

@@ -58,15 +58,15 @@ func newPlayer(a *App) *Player {
 }
 
 func (p *Player) pipeName() string {
-	return fmt.Sprintf(`\\.\pipe\ytframe-%d`, os.Getpid())
+	return fmt.Sprintf(`\\.\pipe\ytframe-%d-%d`, os.Getpid(), p.id)
 }
 
 func (p *Player) start(url string, startSec int) error {
-	mpvPath := filepath.Join(dataDirPath, "mpv.exe")
+	mpvPath := bundledPath("mpv.exe")
 	if _, err := os.Stat(mpvPath); err != nil {
 		return fmt.Errorf("mpv.exe is missing from the YTFrame folder")
 	}
-	ytdlpPath := filepath.Join(dataDirPath, "yt-dlp.exe")
+	ytdlpPath := bundledPath("yt-dlp.exe")
 
 	writeInputConf(filepath.Join(dataDirPath, "input.conf"))
 
@@ -164,10 +164,16 @@ func (p *Player) start(url string, startSec int) error {
 
 	go func() {
 		cmd.Wait()
-		close(done)
 		p.mu.Lock()
 		p.running = false
+		conn := p.conn
+		p.conn = nil
+		p.cmdCh = nil
 		p.mu.Unlock()
+		close(done)
+		if conn != nil {
+			conn.Close()
+		}
 		logf("mpv exited id=%d", p.id)
 		postMsg(WM_APP_MPVEXIT, uintptr(p.id), 0)
 	}()
@@ -181,11 +187,21 @@ func (p *Player) connectLoop() {
 	pipe := p.pipeName()
 	access := uint32(syscall.GENERIC_READ | syscall.GENERIC_WRITE)
 	for i := 0; i < 120; i++ {
+		select {
+		case <-p.done:
+			return
+		default:
+		}
 		h, err := syscall.CreateFile(u16(pipe), access, FILE_SHARE_READ|FILE_SHARE_WRITE, nil, syscall.OPEN_EXISTING, 0, 0)
 		if err == nil {
 			f := os.NewFile(uintptr(h), "mpv-ipc")
 			ch := make(chan []byte, 64)
 			p.mu.Lock()
+			if !p.running {
+				p.mu.Unlock()
+				f.Close()
+				return
+			}
 			p.conn = f
 			p.cmdCh = ch
 			p.mu.Unlock()
@@ -217,6 +233,7 @@ func (p *Player) readLoop(f *os.File) {
 	for sc.Scan() {
 		line := sc.Bytes()
 		var m struct {
+			Args   []string        `json:"args"`
 			Event  string          `json:"event"`
 			Name   string          `json:"name"`
 			Data   json.RawMessage `json:"data"`
@@ -227,6 +244,10 @@ func (p *Player) readLoop(f *os.File) {
 			continue
 		}
 		switch m.Event {
+		case "client-message":
+			if len(m.Args) == 1 && m.Args[0] == "ytframe-paste" {
+				postMsg(WM_APP_PASTE, uintptr(p.id), 0)
+			}
 		case "property-change":
 			p.applyProperty(m.Name, m.Data)
 		case "file-loaded":
@@ -234,6 +255,7 @@ func (p *Player) readLoop(f *os.File) {
 			already := p.loadNotified
 			p.loadNotified = true
 			p.eof = false
+			p.eofPosted = false
 			p.mu.Unlock()
 			if !already {
 				logf("mpv file-loaded id=%d", p.id)
@@ -347,7 +369,13 @@ func (p *Player) applyProperty(name string, raw json.RawMessage) {
 // freeze the UI thread; a wedged player is restarted by the load watchdog.
 func (p *Player) writeLoop(f *os.File, ch chan []byte) {
 	w := bufio.NewWriter(f)
-	for b := range ch {
+	for {
+		var b []byte
+		select {
+		case <-p.done:
+			return
+		case b = <-ch:
+		}
 		if _, err := w.Write(b); err != nil {
 			logf("ipc write failed: %v", err)
 			return
@@ -392,10 +420,12 @@ func (p *Player) load(url string, startSec int) {
 	p.pos = 0
 	p.seeking = false
 	p.title = ""
+	p.duration = 0
+	p.hasDuration = false
 	p.mu.Unlock()
 
 	if startSec > 0 {
-		p.command("loadfile", url, "replace", fmt.Sprintf("start=%d", startSec))
+		p.command("loadfile", url, "replace", -1, map[string]string{"start": fmt.Sprint(startSec)})
 	} else {
 		p.command("loadfile", url, "replace")
 	}
@@ -583,7 +613,8 @@ func findWindowForPID(pid uint32) uintptr {
 
 func writeInputConf(path string) {
 	content := "# YTFrame: Ctrl+V replaces the current video with the clipboard link\n" +
-		"Ctrl+v loadfile ${clipboard/text}\n"
+		"Ctrl+v script-message ytframe-paste\n" +
+		"UP add volume 5\nDOWN add volume -5\nHOME seek 0 absolute+exact\n"
 	if b, err := os.ReadFile(path); err == nil && string(b) == content {
 		return
 	}

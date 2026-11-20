@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	cbW = 460
-	cbH = 64
+	cbW = 560
+	cbH = 128
 )
 
 const (
@@ -35,6 +35,9 @@ var cbProcCB uintptr
 func init() { cbProcCB = syscall.NewCallback(cbWndProc) }
 
 func (a *App) createControlBar() {
+	if a.cbScale == 0 {
+		a.cbScale = a.scale
+	}
 	a.cbEnsureGDI()
 	hInst := getModuleHandle()
 	var wc WNDCLASSEXW
@@ -46,8 +49,8 @@ func (a *App) createControlBar() {
 	wc.LpszClassName = u16("YTFrameControls")
 	pRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc)))
 
-	w := int32(cbW * a.scale)
-	h := int32(cbH * a.scale)
+	w := int32(cbW * a.cbScale)
+	h := int32(cbH * a.cbScale)
 	hwnd, _, _ := pCreateWindowExW.Call(
 		WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,
 		uintptr(unsafe.Pointer(u16("YTFrameControls"))),
@@ -71,7 +74,7 @@ func (a *App) cbEnsureGDI() {
 	if a.cbReady {
 		return
 	}
-	s := a.scale
+	s := a.cbScale
 	mk := func(px float64, weight int32) uintptr {
 		h, _, _ := pCreateFontW.Call(
 			uintptr(int32(-px*s)), 0, 0, 0, uintptr(weight),
@@ -81,9 +84,9 @@ func (a *App) cbEnsureGDI() {
 		)
 		return h
 	}
-	a.cbFontBody = mk(11, FW_NORMAL)
-	a.cbFontSmall = mk(8, FW_NORMAL)
-	a.cbFontTime = mk(10, FW_NORMAL)
+	a.cbFontBody = mk(13, FW_NORMAL)
+	a.cbFontSmall = mk(10, FW_NORMAL)
+	a.cbFontTime = mk(12, FW_NORMAL)
 	a.cbBrBg, _, _ = pCreateSolidBrush.Call(colBg)
 	a.cbBrPanel, _, _ = pCreateSolidBrush.Call(colField)
 	a.cbBrHover, _, _ = pCreateSolidBrush.Call(rgb(37, 42, 49))
@@ -97,18 +100,20 @@ func (a *App) cbEnsureGDI() {
 }
 
 func (a *App) cbFreeGDI() {
+	if a.cbBackDC != 0 {
+		pDeleteDC.Call(a.cbBackDC)
+		a.cbBackDC = 0
+	}
+	if a.cbBackBmp != 0 {
+		pDeleteObject.Call(a.cbBackBmp)
+		a.cbBackBmp = 0
+	}
 	for _, h := range []uintptr{a.cbFontBody, a.cbFontSmall, a.cbFontTime,
 		a.cbBrBg, a.cbBrPanel, a.cbBrHover, a.cbBrAccent, a.cbBrIcon,
 		a.cbPenBorder, a.cbPenIcon, a.cbPenMuted, a.cbPenAccent} {
 		if h != 0 {
 			pDeleteObject.Call(h)
 		}
-	}
-	if a.cbBackDC != 0 {
-		pDeleteDC.Call(a.cbBackDC)
-	}
-	if a.cbBackBmp != 0 {
-		pDeleteObject.Call(a.cbBackBmp)
 	}
 	a.cbReady = false
 }
@@ -127,7 +132,7 @@ func (a *App) cbLayout() {
 	var rc RECT
 	pGetClientRect.Call(a.cbHwnd, uintptr(unsafe.Pointer(&rc)))
 	w, h := rc.Right, rc.Bottom
-	s := a.scale
+	s := a.cbScale
 	R := func(x, y, ww, hh float64) RECT {
 		return RECT{
 			Left:   int32(math.Round(x * s)),
@@ -136,23 +141,22 @@ func (a *App) cbLayout() {
 			Bottom: int32(math.Round((y + hh) * s)),
 		}
 	}
-	a.cbSeekRect = R(14, 14, 286, 4)
-	a.cbTimeRect = R(306, 3, 140, 22)
-
-	top := 30.0
-	a.cbBtn[cbBtnPlay] = R(34, top, 28, 26)
-	a.cbBtn[cbBtnBack] = R(66, top, 28, 26)
-	a.cbBtn[cbBtnFwd] = R(98, top, 28, 26)
-	a.cbBtn[cbBtnVol] = R(132, top, 24, 26)
-	a.cbVolRect = R(160, 38, 66, 3)
-	a.cbBtn[cbBtnFullscreen] = R(238, top, 26, 26)
-
-	pos := float64(w)/s - 14
-	for _, id := range []int{cbBtnHide, cbBtnMenu, cbBtnBrowse, cbBtnPin, cbBtnLayouts, cbBtnEye} {
-		pos -= 26
-		a.cbBtn[id] = R(pos, top, 26, 26)
-		pos -= 4
-	}
+	// Each action owns a distinct hit target. Header, timeline and transport
+	// have separate rows so the remote is readable even beside a tiny video.
+	a.cbSeekRect = R(22, 50, 516, 4)
+	a.cbTimeRect = R(366, 61, 172, 20)
+	a.cbBtn[cbBtnBack] = R(44, 86, 32, 32)
+	a.cbBtn[cbBtnPlay] = R(82, 84, 36, 36)
+	a.cbBtn[cbBtnFwd] = R(124, 86, 32, 32)
+	a.cbBtn[cbBtnVol] = R(174, 86, 32, 32)
+	a.cbVolRect = R(216, 101, 80, 4)
+	a.cbBtn[cbBtnFullscreen] = R(326, 86, 32, 32)
+	a.cbBtn[cbBtnEye] = R(366, 86, 32, 32)
+	a.cbBtn[cbBtnLayouts] = R(406, 86, 32, 32)
+	a.cbBtn[cbBtnPin] = R(446, 86, 32, 32)
+	a.cbBtn[cbBtnBrowse] = R(388, 10, 92, 28)
+	a.cbBtn[cbBtnMenu] = R(486, 10, 28, 28)
+	a.cbBtn[cbBtnHide] = R(518, 10, 28, 28)
 
 	r := int32(16 * s)
 	rgn, _, _ := pCreateRoundRectRgn.Call(0, 0, uintptr(w+1), uintptr(h+1), uintptr(r*2), uintptr(r*2))
@@ -167,8 +171,8 @@ func (a *App) cbPosition(w, h int32) (int32, int32) {
 		var pt POINT
 		pGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
 		work := workAreaForPoint(pt)
-		x = work.Right - w - int32(24*a.scale)
-		y = work.Bottom - h - int32(24*a.scale)
+		x = work.Right - w - int32(24*a.cbScale)
+		y = work.Bottom - h - int32(24*a.cbScale)
 	}
 	work := workAreaAt(x+w/2, y+h/2)
 	x = clamp(x, work.Left, work.Right-w)
@@ -186,8 +190,8 @@ func (a *App) showControlBar() {
 	if a.cbHwnd == 0 {
 		return
 	}
-	w := int32(cbW * a.scale)
-	h := int32(cbH * a.scale)
+	w := int32(cbW * a.cbScale)
+	h := int32(cbH * a.cbScale)
 	x, y := a.cbPosition(w, h)
 	z := ^uintptr(1) // HWND_NOTOPMOST
 	if a.settings.BarOntop {
@@ -196,6 +200,7 @@ func (a *App) showControlBar() {
 	pSetWindowPos.Call(a.cbHwnd, z, uintptr(x), uintptr(y), uintptr(w), uintptr(h), SWP_NOACTIVATE)
 	st := a.player.snapshot()
 	a.cbLastPause = st.Pause
+	a.cbTitle = st.Title
 	a.cbLastPos = st.Pos
 	a.cbLastDur = st.Duration
 	a.cbLastVol = st.Volume
@@ -216,6 +221,7 @@ func (a *App) hideControlBar() {
 	a.cbDrag = false
 	a.cbSeekDrag = false
 	a.cbVolDrag = false
+	pReleaseCapture.Call()
 	a.cbPress = -1
 	a.applyVideoVisibility()
 }
@@ -272,16 +278,16 @@ func (a *App) cbHitButton(x, y int32) int {
 }
 
 func (a *App) cbHitSeek(x, y int32) bool {
-	if a.cbLastDur <= 0 {
+	if a.loading || a.cbLastDur <= 0 {
 		return false
 	}
 	r := a.cbSeekRect
-	return x >= r.Left && x <= r.Right && y >= r.Top-int32(8*a.scale) && y <= r.Bottom+int32(8*a.scale)
+	return x >= r.Left && x <= r.Right && y >= r.Top-int32(8*a.cbScale) && y <= r.Bottom+int32(8*a.cbScale)
 }
 
 func (a *App) cbHitVolume(x, y int32) bool {
 	r := a.cbVolRect
-	m := int32(8 * a.scale)
+	m := int32(8 * a.cbScale)
 	return x >= r.Left && x <= r.Right && y >= r.Top-m && y <= r.Bottom+m
 }
 
@@ -306,6 +312,9 @@ func (a *App) cbSetVolumeAt(x int32) {
 	a.cbLastVol = vol
 	if p := a.player; p != nil {
 		p.command("set_property", "volume", vol)
+		if vol > 0 {
+			p.command("set_property", "mute", false)
+		}
 	}
 	a.cbInvalidate()
 }
@@ -327,6 +336,15 @@ func cbWndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 		a.cbEnsureGDI()
 		a.cbLayout()
 		return 0
+	case WM_DPICHANGED:
+		a.cbScale = float64(loword(wparam)) / 96
+		a.cbFreeGDI()
+		a.cbEnsureGDI()
+		r := (*RECT)(unsafe.Pointer(lparam))
+		pSetWindowPos.Call(hwnd, 0, uintptr(r.Left), uintptr(r.Top), uintptr(int32(cbW*a.cbScale)), uintptr(int32(cbH*a.cbScale)), SWP_NOZORDER|SWP_NOACTIVATE)
+		a.cbLayout()
+		a.cbInvalidate()
+		return 0
 	case WM_SIZE:
 		a.cbLayout()
 		return 0
@@ -341,7 +359,7 @@ func cbWndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 	case WM_ERASEBKGND:
 		return 1
 	case WM_MOUSEMOVE:
-		x, y := loword(lparam), hiword(lparam)
+		x, y := mouseX(lparam), mouseY(lparam)
 		if a.cbDrag {
 			var pt POINT
 			pGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
@@ -378,7 +396,7 @@ func cbWndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 		}
 		return 0
 	case WM_LBUTTONDOWN:
-		x, y := loword(lparam), hiword(lparam)
+		x, y := mouseX(lparam), mouseY(lparam)
 		if a.cbHitSeek(x, y) {
 			a.cbSeekDrag = true
 			a.cbSeekTarget = a.cbSeekAt(x)
@@ -406,12 +424,12 @@ func cbWndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 		pSetCapture.Call(hwnd)
 		return 0
 	case WM_LBUTTONUP:
-		x, y := loword(lparam), hiword(lparam)
+		x, y := mouseX(lparam), mouseY(lparam)
 		if a.cbSeekDrag {
 			a.cbSeekDrag = false
 			pReleaseCapture.Call()
 			if p := a.player; p != nil && a.cbLastDur > 0 {
-				p.command("seek", a.cbSeekTarget, "absolute")
+				p.seekAbsolute(a.cbSeekTarget)
 			}
 			a.cbInvalidate()
 			return 0
@@ -437,6 +455,11 @@ func cbWndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 			}
 		}
 		return 0
+	case WM_CAPTURECHANGED, WM_CANCELMODE:
+		a.cbDrag, a.cbSeekDrag, a.cbVolDrag = false, false, false
+		a.cbPress = -1
+		a.cbInvalidate()
+		return 0
 	case WM_MOUSEWHEEL:
 		delta := int16(hiword(wparam))
 		if p := a.player; p != nil {
@@ -452,6 +475,9 @@ func cbWndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 			}
 			a.cbLastVol = vol
 			p.command("set_property", "volume", vol)
+			if vol > 0 {
+				p.command("set_property", "mute", false)
+			}
 			a.cbInvalidate()
 		}
 		return 0
@@ -527,9 +553,9 @@ func (a *App) cbAction(b int) {
 	case cbBtnEye:
 		switch a.settings.VideoMode {
 		case "visible":
-			a.setVideoMode("hidden")
-		case "hidden":
 			a.setVideoMode("auto")
+		case "auto":
+			a.setVideoMode("hidden")
 		default:
 			a.setVideoMode("visible")
 		}
@@ -560,6 +586,7 @@ func (a *App) cbTick() {
 		a.cbLastPause = st.Pause
 		a.applyVideoVisibility()
 	}
+	a.cbTitle = st.Title
 	a.cbLastPos = st.Pos
 	a.cbLastDur = st.Duration
 	a.cbLastVol = st.Volume
@@ -593,13 +620,24 @@ func (a *App) cbPaint(hdc uintptr) {
 	if dc == 0 {
 		return
 	}
-	s := a.scale
+	s := a.cbScale
 	pFillRect.Call(dc, uintptr(unsafe.Pointer(&rc)), a.cbBrBg)
 	pSelectObject.Call(dc, pGetStockObject2(NULL_BRUSH))
 	pSelectObject.Call(dc, a.cbPenBorder)
 	pRoundRect.Call(dc, 1, 1, uintptr(w-1), uintptr(h-1),
 		uintptr(int32(32*s)), uintptr(int32(32*s)))
 
+	// Current video, with enough room for long titles.
+	pSelectObject.Call(dc, a.cbFontBody)
+	pSetTextColor.Call(dc, colText)
+	pSetBkMode.Call(dc, TRANSPARENT)
+	title := a.cbTitle
+	if a.loading {
+		title = "Opening video…"
+	} else if title == "" {
+		title = "YTFrame"
+	}
+	drawText(dc, title, RECT{Left: int32(22 * s), Top: int32(10 * s), Right: int32(372 * s), Bottom: int32(38 * s)}, DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX)
 	// Seek bar.
 	seek := a.cbSeekRect
 	frac := 0.0
@@ -638,6 +676,9 @@ func (a *App) cbPaint(hdc uintptr) {
 		}
 		text = clockStr(cur) + " / " + clockStr(a.cbLastDur)
 		pSetTextColor.Call(dc, colMuted)
+	} else if a.loading {
+		text = "Loading…"
+		pSetTextColor.Call(dc, colMuted)
 	} else {
 		text = "LIVE"
 		pSetTextColor.Call(dc, colMuted)
@@ -645,12 +686,25 @@ func (a *App) cbPaint(hdc uintptr) {
 	pSetBkMode.Call(dc, TRANSPARENT)
 	drawText(dc, text, a.cbTimeRect, DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX)
 
+	// Contextual hints make the icon controls discoverable without tooltips
+	// that can cover a small video or take focus from another application.
+	pSelectObject.Call(dc, a.cbFontTime)
+	pSetTextColor.Call(dc, colMuted)
+	hint := a.cbHint()
+	drawText(dc, hint, RECT{Left: int32(22 * s), Top: int32(61 * s), Right: int32(360 * s), Bottom: int32(81 * s)}, DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX)
+
 	// Buttons.
 	for i := 0; i < cbBtnCount; i++ {
 		r := a.cbBtn[i]
-		if a.cbHover == i || a.cbPress == i {
+		if i == cbBtnPlay || i == cbBtnBrowse || a.cbHover == i || a.cbPress == i {
 			br := a.cbBrHover
-			if a.cbPress == i {
+			if i == cbBtnPlay {
+				br = a.cbBrAccent
+			}
+			if i == cbBtnBrowse && a.cbHover != i {
+				br = a.cbBrPanel
+			}
+			if a.cbPress == i && i != cbBtnPlay {
 				br = a.cbBrPanel
 			}
 			pSelectObject.Call(dc, pGetStockObject2(NULL_PEN))
@@ -676,7 +730,9 @@ func (a *App) cbPaint(hdc uintptr) {
 		case cbBtnPin:
 			a.cbIconPin(dc, r)
 		case cbBtnBrowse:
-			a.cbIconBrowse(dc, r)
+			pSelectObject.Call(dc, a.cbFontTime)
+			pSetTextColor.Call(dc, colText)
+			drawText(dc, "Browse", r, DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX)
 		case cbBtnHide:
 			a.cbIconClose(dc, r)
 		case cbBtnMenu:
@@ -691,6 +747,9 @@ func (a *App) cbPaint(hdc uintptr) {
 		pSelectObject.Call(dc, a.cbBrPanel)
 		pRoundRect.Call(dc, uintptr(vr.Left), uintptr(vr.Top), uintptr(vr.Right), uintptr(vr.Bottom), 3, 3)
 		vf := math.Max(0, math.Min(1, float64(a.cbLastVol)/130.0))
+		if a.cbLastMute {
+			vf = 0
+		}
 		vw := int32(float64(vr.Right-vr.Left) * vf)
 		if vw > 0 {
 			pSelectObject.Call(dc, a.cbBrAccent)
@@ -702,8 +761,8 @@ func (a *App) cbPaint(hdc uintptr) {
 	pSelectObject.Call(dc, a.cbBrIcon)
 	for row := 0; row < 3; row++ {
 		for col := 0; col < 2; col++ {
-			cx := int32((20 + float64(col)*4) * s)
-			cy := int32((34 + float64(row)*7) * s)
+			cx := int32((24 + float64(col)*4) * s)
+			cy := int32((94 + float64(row)*7) * s)
 			rr := int32(1.3 * s)
 			pEllipse.Call(dc, uintptr(cx-rr), uintptr(cy-rr), uintptr(cx+rr), uintptr(cy+rr))
 		}
@@ -713,7 +772,7 @@ func (a *App) cbPaint(hdc uintptr) {
 }
 
 func (a *App) cbIconPlay(dc uintptr, r RECT, paused bool) {
-	s := a.scale
+	s := a.cbScale
 	cx := (r.Left + r.Right) / 2
 	cy := (r.Top + r.Bottom) / 2
 	if paused {
@@ -722,21 +781,21 @@ func (a *App) cbIconPlay(dc uintptr, r RECT, paused bool) {
 			{cx - sz/2, cy - sz}, {cx - sz/2, cy + sz}, {cx + sz, cy},
 		}
 		pSelectObject.Call(dc, pGetStockObject2(NULL_PEN))
-		pSelectObject.Call(dc, a.cbBrIcon)
+		pSelectObject.Call(dc, a.cbBrBg)
 		pPolygon.Call(dc, uintptr(unsafe.Pointer(&pts[0])), 3)
 	} else {
 		bw := int32(4 * s)
 		gap := int32(4 * s)
 		hh := int32(8 * s)
 		pSelectObject.Call(dc, pGetStockObject2(NULL_PEN))
-		pSelectObject.Call(dc, a.cbBrIcon)
+		pSelectObject.Call(dc, a.cbBrBg)
 		pRoundRect.Call(dc, uintptr(cx-gap/2-bw), uintptr(cy-hh), uintptr(cx-gap/2), uintptr(cy+hh), 2, 2)
 		pRoundRect.Call(dc, uintptr(cx+gap/2), uintptr(cy-hh), uintptr(cx+gap/2+bw), uintptr(cy+hh), 2, 2)
 	}
 }
 
 func (a *App) cbIconStep(dc uintptr, r RECT, dir int) {
-	s := a.scale
+	s := a.cbScale
 	cx := (r.Left + r.Right) / 2
 	cy := (r.Top + r.Bottom) / 2
 	sz := int32(5 * s)
@@ -759,7 +818,7 @@ func (a *App) cbIconStep(dc uintptr, r RECT, dir int) {
 }
 
 func (a *App) cbIconVolume(dc uintptr, r RECT, muted bool) {
-	s := a.scale
+	s := a.cbScale
 	cx := (r.Left + r.Right) / 2
 	cy := (r.Top + r.Bottom) / 2
 	px := func(v float64) int32 { return int32(math.Round(v * s)) }
@@ -783,7 +842,7 @@ func (a *App) cbIconVolume(dc uintptr, r RECT, muted bool) {
 }
 
 func (a *App) cbIconFullscreen(dc uintptr, r RECT) {
-	s := a.scale
+	s := a.cbScale
 	cx := (r.Left + r.Right) / 2
 	cy := (r.Top + r.Bottom) / 2
 	d := int32(7 * s)
@@ -802,7 +861,7 @@ func (a *App) cbIconFullscreen(dc uintptr, r RECT) {
 }
 
 func (a *App) cbIconEye(dc uintptr, r RECT) {
-	s := a.scale
+	s := a.cbScale
 	cx := (r.Left + r.Right) / 2
 	cy := (r.Top + r.Bottom) / 2
 	w := int32(9 * s)
@@ -828,7 +887,7 @@ func (a *App) cbIconEye(dc uintptr, r RECT) {
 }
 
 func (a *App) cbIconLayouts(dc uintptr, r RECT) {
-	s := a.scale
+	s := a.cbScale
 	cx := (r.Left + r.Right) / 2
 	cy := (r.Top + r.Bottom) / 2
 	sz := int32(5 * s)
@@ -845,7 +904,7 @@ func (a *App) cbIconLayouts(dc uintptr, r RECT) {
 }
 
 func (a *App) cbIconPin(dc uintptr, r RECT) {
-	s := a.scale
+	s := a.cbScale
 	cx := (r.Left + r.Right) / 2
 	cy := (r.Top + r.Bottom) / 2
 	pen := a.cbPenIcon
@@ -866,7 +925,7 @@ func (a *App) cbIconPin(dc uintptr, r RECT) {
 }
 
 func (a *App) cbIconBrowse(dc uintptr, r RECT) {
-	s := a.scale
+	s := a.cbScale
 	cx := (r.Left + r.Right) / 2
 	cy := (r.Top + r.Bottom) / 2
 	pSelectObject.Call(dc, a.cbPenIcon)
@@ -881,7 +940,7 @@ func (a *App) cbIconBrowse(dc uintptr, r RECT) {
 }
 
 func (a *App) cbIconClose(dc uintptr, r RECT) {
-	s := a.scale
+	s := a.cbScale
 	cx := (r.Left + r.Right) / 2
 	cy := (r.Top + r.Bottom) / 2
 	d := int32(5 * s)
@@ -893,7 +952,7 @@ func (a *App) cbIconClose(dc uintptr, r RECT) {
 }
 
 func (a *App) cbIconMenu(dc uintptr, r RECT) {
-	s := a.scale
+	s := a.cbScale
 	cx := (r.Left + r.Right) / 2
 	cy := (r.Top + r.Bottom) / 2
 	pSelectObject.Call(dc, pGetStockObject2(NULL_PEN))
@@ -1120,8 +1179,8 @@ func (a *App) moveBarTo(x, y int32) {
 	if a.cbHwnd == 0 {
 		return
 	}
-	w := int32(cbW * a.scale)
-	h := int32(cbH * a.scale)
+	w := int32(cbW * a.cbScale)
+	h := int32(cbH * a.cbScale)
 	work := workAreaAt(x+w/2, y+h/2)
 	x = clamp(x, work.Left, work.Right-w)
 	y = clamp(y, work.Top, work.Bottom-h)
@@ -1254,4 +1313,56 @@ func (a *App) cbShowMenu() {
 	if cmd != 0 {
 		a.onMenuCommand(int(cmd))
 	}
+}
+
+func (a *App) cbHint() string {
+	switch a.cbHover {
+	case cbBtnPlay:
+		if a.cbLastPause {
+			return "Play · Ctrl+Alt+Space"
+		}
+		return "Pause · Ctrl+Alt+Space"
+	case cbBtnBack:
+		return "Back 10 seconds · Ctrl+Alt+J"
+	case cbBtnFwd:
+		return "Forward 10 seconds · Ctrl+Alt+L"
+	case cbBtnVol:
+		if a.cbLastMute {
+			return "Unmute · Ctrl+Alt+M"
+		}
+		return fmt.Sprintf("Volume %d%% · Click to mute", a.cbLastVol)
+	case cbBtnFullscreen:
+		return "Toggle fullscreen"
+	case cbBtnEye:
+		return "Video: " + map[string]string{"visible": "always visible", "auto": "hide on pause", "hidden": "audio only"}[a.settings.VideoMode]
+	case cbBtnLayouts:
+		return "Saved layouts · Ctrl+Alt+1…5"
+	case cbBtnPin:
+		if a.settings.BarOntop {
+			return "Unpin controls"
+		}
+		return "Keep controls on top"
+	case cbBtnBrowse:
+		return "Find another video on YouTube"
+	case cbBtnMenu:
+		return "More options"
+	case cbBtnHide:
+		return "Hide controls · Ctrl+Alt+B to restore"
+	}
+	if a.cbVolDrag {
+		return fmt.Sprintf("Volume %d%%", a.cbLastVol)
+	}
+	if a.cbSeekDrag {
+		return "Release to seek"
+	}
+	if a.cbLastMute {
+		return "Muted"
+	}
+	if a.cbLastPause {
+		return "Paused"
+	}
+	if a.loading {
+		return "Connecting to the player"
+	}
+	return "Playing"
 }
