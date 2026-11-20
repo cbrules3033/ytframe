@@ -258,6 +258,13 @@ func TestControlsCanBeRestoredBeforePlayingAVideo(t *testing.T) {
 		t.Fatal("controls did not appear before playback")
 	}
 	defer func() { pDestroyWindow.Call(a.cbHwnd); a.cbFreeGDI() }()
+	before := a.cbInvalidations
+	for i := 0; i < 20; i++ {
+		a.cbTick()
+	}
+	if a.cbInvalidations != before {
+		t.Fatal("idle timer repeatedly invalidated unchanged controls")
+	}
 	a.setControlBarVisible(false)
 	a.toggleControlBar()
 	visible, _, _ := pIsWindowVisible.Call(a.cbHwnd)
@@ -342,5 +349,29 @@ func TestFinishedVideoRemainsRecentWithoutResuming(t *testing.T) {
 	}
 	if resumeStart(url, h) != 0 {
 		t.Fatal("finished video incorrectly resumes")
+	}
+}
+
+func TestQualityChangeReusesPlayerAndPreservesPausedPosition(t *testing.T) {
+	previous := dataDirPath
+	dataDirPath = t.TempDir()
+	defer func() { dataDirPath = previous }()
+	a := &App{settings: defaultSettings()}
+	p := &Player{app: a, id: 1, running: true, cmdCh: make(chan []byte, 16), url: "https://youtu.be/abcdefghijk", duration: 120, hasDuration: true, pos: 60, pause: true}
+	a.player = p
+	a.switchQuality("720")
+	if a.player != p || !p.isRunning() || !a.pendingPause || a.loadingStart != 60 {
+		t.Fatal("quality change restarted the engine or lost playback state")
+	}
+	var message struct {
+		Command []json.RawMessage `json:"command"`
+	}
+	json.Unmarshal(<-p.cmdCh, &message)
+	var options map[string]string
+	if err := json.Unmarshal(message.Command[4], &options); err != nil {
+		t.Fatal(err)
+	}
+	if options["start"] != "60" || options["ytdl-format"] != qualityFormat("720") {
+		t.Fatalf("bad quality reload: %v", options)
 	}
 }
