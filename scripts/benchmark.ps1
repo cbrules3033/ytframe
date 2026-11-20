@@ -9,7 +9,7 @@ function Samples($Path) {
         $Timer.Stop()
         $Values += [Math]::Round($Timer.Elapsed.TotalMilliseconds, 2)
     }
-    return ,$Values
+    return $Values
 }
 function Median($Values) {
     $Sorted = @($Values | Sort-Object)
@@ -23,8 +23,8 @@ $Result = [ordered]@{
     operation = '--ignore-config --version (process startup only, no network)'
     onefile_ms = $OneFile
     unpacked_ms = $Unpacked
-    onefile_warm_median_ms = Median $OneFile[1..5]
-    unpacked_warm_median_ms = Median $Unpacked[1..5]
+    onefile_warm_median_ms = Median ($OneFile[1..5])
+    unpacked_warm_median_ms = Median ($Unpacked[1..5])
 }
 $Result | ConvertTo-Json -Depth 4 | Set-Content "$PackagePath/RESOLVER_BENCHMARK.json"
 & go test -c -o "$PackagePath/YTFrame-performance.exe" ./cmd/ytframe

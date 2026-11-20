@@ -69,7 +69,7 @@ func unpackResolver(archive, dest string) error {
 	for _, entry := range z.File {
 		name := strings.ReplaceAll(entry.Name, "\\", "/")
 		clean := filepath.Clean(filepath.FromSlash(name))
-		if filepath.IsAbs(clean) || filepath.VolumeName(clean) != "" || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) || strings.Contains(name, ":") || entry.Mode()&os.ModeSymlink != 0 {
+		if strings.HasPrefix(name, "/") || filepath.IsAbs(clean) || filepath.VolumeName(clean) != "" || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) || strings.Contains(name, ":") || entry.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("invalid resolver archive path %q", entry.Name)
 		}
 		if entry.UncompressedSize64 > (256<<20)-total {
