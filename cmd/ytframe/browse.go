@@ -205,7 +205,7 @@ func (bw *browseWindow) ensureGDI() {
 		return h
 	}
 	bw.fontBody = mk(13, FW_NORMAL)
-	bw.fontTitle = mk(16, FW_SEMIBOLD)
+	bw.fontTitle = mk(22, FW_SEMIBOLD)
 	bw.brBg, _, _ = pCreateSolidBrush.Call(colBg)
 	bw.brPanel, _, _ = pCreateSolidBrush.Call(colField)
 	bw.brHover, _, _ = pCreateSolidBrush.Call(rgb(37, 42, 49))
@@ -309,9 +309,9 @@ func (bw *browseWindow) layout() {
 		bw.w.Resize()
 	}
 	if bw.failed {
-		ct := th + int32(50*s)
-		bw.btn[bwBtnGet] = RECT{Left: int32(40 * s), Top: ct + int32(200*s), Right: int32(200 * s), Bottom: ct + int32(236*s)}
-		bw.btn[bwBtnCloseErr] = RECT{Left: int32(216 * s), Top: ct + int32(200*s), Right: int32(316 * s), Bottom: ct + int32(236*s)}
+		c := bw.errorContent()
+		bw.btn[bwBtnGet] = RECT{Left: c.Left, Top: c.Top + int32(142*s), Right: c.Left + int32(160*s), Bottom: c.Top + int32(184*s)}
+		bw.btn[bwBtnCloseErr] = RECT{Left: c.Left + int32(172*s), Top: c.Top + int32(142*s), Right: c.Left + int32(272*s), Bottom: c.Top + int32(184*s)}
 	}
 }
 
@@ -351,15 +351,20 @@ func (bw *browseWindow) paint(hdc uintptr) {
 	if bw.failed {
 		content := RECT{Left: 0, Top: th, Right: w, Bottom: h}
 		pFillRect.Call(hdc, uintptr(unsafe.Pointer(&content)), bw.brBg)
+		c := bw.errorContent()
+		pad := int32(28 * s)
+		pSelectObject.Call(hdc, bw.penBorder)
+		pSelectObject.Call(hdc, bw.brPanel)
+		pRoundRect.Call(hdc, uintptr(c.Left-pad), uintptr(c.Top-pad), uintptr(c.Right+pad), uintptr(c.Bottom+pad), uintptr(int32(24*s)), uintptr(int32(24*s)))
+		pSelectObject.Call(hdc, bw.fontBody)
+		pSetTextColor.Call(hdc, colAccent)
+		drawText(hdc, "BROWSER SETUP", RECT{Left: c.Left, Top: c.Top, Right: c.Right, Bottom: c.Top + int32(20*s)}, DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX)
 		pSelectObject.Call(hdc, bw.fontTitle)
 		pSetTextColor.Call(hdc, colText)
-		t1 := RECT{Left: int32(40 * s), Top: th + int32(50*s), Right: w - int32(40*s), Bottom: th + int32(90*s)}
-		drawText(hdc, "YouTube needs Microsoft Edge WebView2", t1, DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX)
+		drawText(hdc, "One quick setup for browsing", RECT{Left: c.Left, Top: c.Top + int32(28*s), Right: c.Right, Bottom: c.Top + int32(62*s)}, DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX)
 		pSelectObject.Call(hdc, bw.fontBody)
 		pSetTextColor.Call(hdc, colMuted)
-		t2 := RECT{Left: int32(40 * s), Top: th + int32(96*s), Right: w - int32(40*s), Bottom: th + int32(180*s)}
-		drawText(hdc, "Install the free WebView2 Runtime once, then reopen Browse. The player, paste bar and control bar keep working without it.",
-			t2, DT_LEFT|DT_WORDBREAK|DT_NOPREFIX)
+		drawText(hdc, "YouTube browsing needs Microsoft Edge WebView2. Install the free Runtime once, then reopen Browse. You can keep playing links in YTFrame.", RECT{Left: c.Left, Top: c.Top + int32(76*s), Right: c.Right, Bottom: c.Top + int32(128*s)}, DT_LEFT|DT_WORDBREAK|DT_NOPREFIX)
 		bw.drawTextButton(hdc, bwBtnGet, "Get WebView2", true)
 		bw.drawTextButton(hdc, bwBtnCloseErr, "Close", false)
 	}
@@ -911,4 +916,19 @@ func (bw *browseWindow) freeGDI() {
 		}
 	}
 	bw.fontBody = 0
+}
+
+func (bw *browseWindow) errorContent() RECT {
+	var rc RECT
+	pGetClientRect.Call(bw.hwnd, uintptr(unsafe.Pointer(&rc)))
+	s := bw.scale
+	w := int32(536 * s)
+	if max := rectW(rc) - int32(88*s); w > max {
+		w = max
+	}
+	h := int32(190 * s)
+	x := (rectW(rc) - w) / 2
+	th := int32(browseToolbarH * s)
+	y := th + (rectH(rc)-th-h)/2
+	return RECT{Left: x, Top: y, Right: x + w, Bottom: y + h}
 }
