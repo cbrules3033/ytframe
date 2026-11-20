@@ -53,6 +53,9 @@ type WebView interface {
 	// Resize asks the backend to match the parent/client size.
 	Resize()
 
+	// SetVisible updates the controller and page visibility while keeping the session.
+	SetVisible(visible bool)
+
 	// SetSize updates native window size. See Hint constants.
 	SetSize(w int, h int, hint Hint)
 

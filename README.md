@@ -6,6 +6,8 @@ Paste a link or browse YouTube, click a video, and it plays in a window that is 
 
 **[Download the latest release](https://github.com/cbrules3033/ytframe/releases/latest)** — extract the zip anywhere and run `YTFrame.exe`.
 
+**New in 1.3:** a launcher with recent videos and a visible **Show controls** action; a larger, clearer remote available before playback; cancelable loading; a warmed player; a faster unpacked video resolver; and a reusable YouTube browser. Playback IPC now uses asynchronous Windows pipes so idle reads cannot stall control commands. [Measured performance and test details](docs/PERFORMANCE.md).
+
 ![The paste bar](docs/bar.png)
 
 ![The floating control bar](docs/controlbar.png)
@@ -19,7 +21,9 @@ YTFrame hands the video to [mpv](https://mpv.io) via [yt-dlp](https://github.com
 ## Features
 
 - **Video only.** No window border, no player chrome, no ads in the player.
-- **Floating control bar.** Its own small window: play/pause, ±10s, seek, time, volume, fullscreen, video mode, layouts, pin, Browse, hide. Free-floating, always on top by default, never steals focus.
+- **Recent videos.** Resume a recent video directly from the launcher.
+- **Faster startup.** The player warms while the launcher is visible, and the resolver no longer unpacks Python for every link. The browser preserves its session between opens.
+- **Floating control bar.** Available at startup, during loading and during playback. Its own small window: play/pause, ±10s, seek, time, volume, fullscreen, video mode, layouts, pin, Browse, hide. Free-floating, always on top by default, never steals focus.
 - **Three video modes.** Show always · Hide on pause · Always hidden (audio-only). The bar stays as the remote when the picture is hidden.
 - **Five layouts.** Save the video window and bar positions into slots, apply them with `Ctrl+Alt+1…5`, save with `Ctrl+Alt+Shift+1…5`, and mark one as the startup default.
 - **Browse YouTube.** A borderless custom window with the real YouTube site (home, search, channels, recommendations). Clicking a video sends it to the player. Uses the system Edge WebView2 runtime; profile and logins live in `browse-data/`.
@@ -46,7 +50,8 @@ Requirements: Windows 10 or 11, 64-bit. YouTube browsing needs the Microsoft Edg
 | --- | --- |
 | Play a link | Paste it into the bar and press **Enter** |
 | Browse YouTube | Tray → **Browse YouTube…**, or the bar's Browse button |
-| Show/hide the control bar | **Ctrl+Alt+B** or tray → **Control bar** |
+| Show/hide the control bar | Launcher → **Show controls**, **Ctrl+Alt+B**, or tray → **Control bar** |
+| Cancel a load | Launcher → **Cancel** or the remote’s **■** button |
 | Move/resize the video | Drag the video / drag any edge or corner |
 | Fullscreen | **Double-click** the video, or **F**; **Esc** leaves it |
 | Pause | **Space** or **Ctrl+Alt+Space**; in Hide-on-pause mode the picture hides, the bar stays |
@@ -65,14 +70,14 @@ Requirements: Windows 10 or 11, 64-bit. YouTube browsing needs the Microsoft Edg
 
 ## The control bar
 
-The bar is a separate window, so it can be larger than a tiny video and remains readable at any size. It is always on top by default (the pin toggles it) and uses `WS_EX_NOACTIVATE`, so clicking it never steals focus from the video, a fullscreen app, or your work.
+The remote is available before playback, so you can always reach **+ Open** and **Browse**. It shows loading and buffering states; during loading its primary button becomes **Cancel**. The **−** button hides it, and the launcher’s **Show controls** button restores it. The remote has a title row, a dedicated timeline and generously spaced playback controls. Hover an icon to see its action and shortcut. The bar is a separate window, so it can be larger than a tiny video and remains readable at any size. It is always on top by default (the pin toggles it) and uses `WS_EX_NOACTIVATE`, so clicking it never steals focus from the video, a fullscreen app, or your work.
 
 - The seek line is clickable and draggable; the time updates live.
 - The volume slider is clickable/draggable; the wheel over the bar also adjusts volume.
 - The eye button cycles **Show always → Hide on pause → Always hidden (audio only)**.
 - The grid button opens the five layout slots.
 - The pin toggles the bar's always-on-top.
-- The overflow menu (⋯) has radio versions of the video modes, the two always-on-top toggles, layouts, in-video controls, Browse and Hide.
+- The overflow menu (⋯) has radio versions of the video modes, the two always-on-top toggles, layouts, quality, in-video controls, Browse and Hide. **Close YouTube browser** frees the retained browser session when one exists.
 
 The in-video mpv controls are off by default (they're unusable on tiny windows); tray → **In-video controls** brings them back.
 
@@ -88,7 +93,7 @@ Five slots, each storing the video window rect and the control-bar position.
 
 ## YouTube browser
 
-Tray → **Browse YouTube…** opens a borderless custom window with a 40px dark toolbar and the real YouTube site below it. Clicking a video (or Shorts) sends it to the player and closes the browser; the control bar returns.
+Tray → **Browse YouTube…** opens a borderless custom window with a 52px dark toolbar and the real YouTube site below it. Clicking a video (or Shorts) sends it to the player and hides the browser. The control bar stays available. Closing the browser with its **×** also hides it and retains the loaded page for fast reopening; the remote menu’s **Close YouTube browser** frees the session. Quitting YTFrame closes it completely. Hidden browser media is paused and WebView2 page visibility is set to hidden.
 
 - Back/forward/reload/home buttons; `Alt+←/→` and `Alt+Home` also work.
 - The browse profile is stored in `browse-data/` next to the exe, so logins and cookies survive restarts. Tray → **Clear YouTube browsing data** removes it.
@@ -108,14 +113,16 @@ Live links work the same way. The window stays at the stream's aspect ratio, see
 
 ## When YouTube breaks
 
-Right-click the tray icon and choose **Update yt-dlp**. It updates the bundled `yt-dlp.exe` in place (no admin needed), and playback usually works again immediately.
+Right-click the tray icon and choose **Update yt-dlp**. It downloads the official unpacked resolver, checks it against the release’s SHA-256 manifest, and installs it beside any previous version. The next video uses the update. This also works when the app folder is read-only, using the writable data directory.
 
 ## Files in the folder
 
 ```
 YTFrame.exe      the app
 mpv.exe          playback engine
-yt-dlp.exe       link resolver
+resolver/        unpacked yt-dlp.exe and its Python runtime
+resolver-updates/ updated resolver versions, created when needed
+resolver-version.txt active updated resolver, created when needed
 settings.json    created on first run
 history.json     resume positions and titles
 browse-data/     WebView2 profile (logins/cookies)
@@ -127,7 +134,7 @@ Delete the folder to uninstall. Nothing is left behind (unless the folder was re
 
 ## Troubleshooting
 
-- **The control bar doesn't appear** — press `Ctrl+Alt+B` or use tray → **Control bar**. It only shows while a video is loaded.
+- **The control bar doesn't appear** — press `Ctrl+Alt+B` or use tray → **Control bar**. It works before a video is loaded too; **Show controls** on the launcher restores it.
 - **Hide on pause doesn't hide the picture** — make sure the control bar is visible (the bar is the remote); with the bar hidden, pausing intentionally leaves the frame visible.
 - **A layout feels off** — layouts store the width and top-left; the height is recomputed for the current video's aspect so the picture never gets bars. Save again after positioning the bar.
 - **Browse says WebView2 is missing** — install Microsoft's WebView2 Runtime from the button in that window, then reopen Browse.
@@ -142,7 +149,8 @@ You need Go 1.19+ and the bundled binaries in `bundle/`:
 
 ```
 bundle/mpv.exe      (Windows build, 64-bit)
-bundle/yt-dlp.exe
+bundle/resolver/yt-dlp.exe
+bundle/resolver/_internal/    (from the official yt-dlp_win.zip)
 ```
 
 Then:
@@ -154,13 +162,28 @@ CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build \
   -o dist/YTFrame-win64/YTFrame.exe ./cmd/ytframe
 ```
 
-`scripts/build.sh` does the full package (build, copy mpv/yt-dlp, zip, checksum). The Windows icon, version info and DPI manifest are compiled from `cmd/ytframe/app.rc` into `rsrc.syso`; that file is committed so the build does not need MinGW. To change the icon or manifest, regenerate it with:
+`scripts/build.sh` does the full package (build, copy mpv/yt-dlp, zip, checksum). On Windows, use `scripts/package.ps1`; it downloads the pinned dependencies and verifies their SHA-256 hashes. Both stage fresh packages under `dist/staging/` so rebuilding does not erase an existing portable installation under `dist/YTFrame-win64/`.
+
+The [Windows build workflow](.github/workflows/windows.yml) runs regression tests and uploads an unsigned ZIP and checksum for each build. To run checks locally on Windows:
+
+```powershell
+go test -count=1 ./cmd/ytframe
+go vet -unsafeptr=false ./cmd/ytframe
+```
+
+The `unsafeptr` analyzer is excluded because Win32 callbacks deliver pointers through `uintptr`. All other vet checks run. The Windows icon, version info and DPI manifest are compiled from `cmd/ytframe/app.rc` into `rsrc.syso`; that file is committed so the build does not need MinGW. To change the icon or manifest, regenerate it with:
 
 ```bash
 x86_64-w64-mingw32-windres -i cmd/ytframe/app.rc -O coff -o cmd/ytframe/rsrc.syso
 ```
 
+Windows packaging also writes `RESOLVER_BENCHMARK.json` and `PLAYBACK_BENCHMARK.json` into the ZIP. See [performance measurements](docs/PERFORMANCE.md) for scope and reproduction.
+
 The WebView2 wrapper is a small patched copy of [go-webview2](https://github.com/jchv/go-webview2) under `third_party/` (MIT); the patch lets it embed into our own borderless host window. `go-webview2` embeds the WebView2Loader DLL, so no extra files are shipped.
+
+## Code signing policy
+
+Current builds are unsigned. See the [code signing policy and free signing setup](docs/CODE_SIGNING.md) for the project's release policy, dependency disclosures and the SignPath Foundation application details. Signing requires provider approval and maintainer account setup; no approval or signature is claimed.
 
 ## Credits and licences
 

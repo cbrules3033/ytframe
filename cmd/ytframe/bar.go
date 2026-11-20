@@ -8,6 +8,8 @@ import (
 )
 
 const (
+	launcherW      = 640
+	launcherH      = 400
 	colBg          = 0x001A1614 // #14161a
 	colBorder      = 0x00362F2B // #2b2f36
 	colField       = 0x00241F1C // #1c1f24
@@ -20,12 +22,24 @@ const (
 	colError       = 0x00808AFF // #ff8a80
 )
 
-var (
-	oldEditProc uintptr
-	editProcCB  = syscall.NewCallback(func(hwnd, msg, w, l uintptr) uintptr {
+var oldEditProc, editProcCB uintptr
+
+func init() {
+	barProcCB = syscall.NewCallback(barWndProc)
+	editProcCB = syscall.NewCallback(func(hwnd, msg, w, l uintptr) uintptr {
 		switch msg {
 		case WM_KEYDOWN:
 			switch w {
+			case VK_A:
+				if ctrl, _, _ := pGetKeyState.Call(VK_CONTROL); int16(ctrl) < 0 {
+					pSendMessageW.Call(hwnd, EM_SETSEL, 0, ^uintptr(0))
+					return 0
+				}
+			case VK_TAB:
+				if app != nil {
+					app.cycleLauncherFocus()
+				}
+				return 0
 			case VK_RETURN:
 				if app != nil {
 					app.submit()
@@ -37,8 +51,12 @@ var (
 				}
 				return 0
 			}
+		case WM_SETFOCUS, WM_KILLFOCUS:
+			if app != nil {
+				app.invalidateBar()
+			}
 		case WM_CHAR:
-			if w == 13 || w == 27 {
+			if w == 1 || w == 9 || w == 13 || w == 27 {
 				return 0
 			}
 		}
@@ -49,7 +67,7 @@ var (
 		r, _, _ := pDefWindowProcW.Call(hwnd, msg, w, l)
 		return r
 	})
-)
+}
 
 func (a *App) ensureGDI() {
 	if a.gdiReady {
@@ -69,9 +87,10 @@ func (a *App) ensureGDI() {
 		)
 		return h
 	}
-	a.fontTitle = mkFont(13.5, FW_SEMIBOLD)
-	a.fontBody = mkFont(13, FW_NORMAL)
-	a.fontHint = mkFont(11, FW_NORMAL)
+	a.fontBrand = mkFont(24, FW_SEMIBOLD)
+	a.fontTitle = mkFont(13, FW_SEMIBOLD)
+	a.fontBody = mkFont(14, FW_NORMAL)
+	a.fontHint = mkFont(12, FW_NORMAL)
 	a.fontClose = mkFont(19, FW_NORMAL)
 
 	a.brBg, _, _ = pCreateSolidBrush.Call(colBg)
@@ -80,27 +99,31 @@ func (a *App) ensureGDI() {
 	a.brAccentHover, _, _ = pCreateSolidBrush.Call(colAccentHover)
 	a.penBorder, _, _ = pCreatePen.Call(PS_SOLID, 1, colBorder)
 	a.penField, _, _ = pCreatePen.Call(PS_SOLID, 1, colFieldBorder)
+	a.penFocus, _, _ = pCreatePen.Call(PS_SOLID, uintptr(maxInt(1, int(2*s))), colAccent)
+	a.penError, _, _ = pCreatePen.Call(PS_SOLID, 1, colError)
 	a.penClose, _, _ = pCreatePen.Call(PS_SOLID, uintptr(int32(1.6*s)), colMuted)
 	a.gdiReady = true
 }
 
 func (a *App) freeGDI() {
-	for _, h := range []uintptr{a.fontTitle, a.fontBody, a.fontHint, a.fontClose,
-		a.brBg, a.brField, a.brAccent, a.brAccentHover, a.penBorder, a.penField, a.penClose} {
+	if a.backDC != 0 {
+		pDeleteDC.Call(a.backDC)
+		a.backDC = 0
+	}
+	if a.backBmp != 0 {
+		pDeleteObject.Call(a.backBmp)
+		a.backBmp = 0
+	}
+	for _, h := range []uintptr{a.fontBrand, a.fontTitle, a.fontBody, a.fontHint, a.fontClose,
+		a.brBg, a.brField, a.brAccent, a.brAccentHover, a.penBorder, a.penField, a.penClose, a.penFocus, a.penError} {
 		if h != 0 {
 			pDeleteObject.Call(h)
 		}
 	}
-	if a.backDC != 0 {
-		pDeleteDC.Call(a.backDC)
-	}
-	if a.backBmp != 0 {
-		pDeleteObject.Call(a.backBmp)
-	}
 	a.gdiReady = false
 }
 
-var barProcCB = syscall.NewCallback(barWndProc)
+var barProcCB uintptr
 
 func barWndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 	defer func() {
@@ -118,6 +141,16 @@ func barWndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 		a.barHwnd = hwnd
 		a.createEdit()
 		return 0
+	case WM_DPICHANGED:
+		a.scale = float64(loword(wparam)) / 96
+		a.freeGDI()
+		a.ensureGDI()
+		pSendMessageW.Call(a.editHwnd, WM_SETFONT, a.fontBody, 1)
+		r := (*RECT)(unsafe.Pointer(lparam))
+		pSetWindowPos.Call(hwnd, 0, uintptr(r.Left), uintptr(r.Top), uintptr(int32(launcherW*a.scale)), uintptr(int32(a.launcherHeight()*a.scale)), SWP_NOZORDER|SWP_NOACTIVATE)
+		a.layoutBar()
+		a.invalidateBar()
+		return 0
 	case WM_SIZE:
 		a.layoutBar()
 		a.invalidateBar()
@@ -133,67 +166,69 @@ func barWndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 	case WM_ERASEBKGND:
 		return 1
 	case WM_MOUSEMOVE:
-		x, y := loword(lparam), hiword(lparam)
-		overBtn := pointIn(a.btnRect, x, y)
-		overClose := pointIn(a.closeRect, x, y)
-		if overBtn != a.hoverBtn || overClose != a.hoverClose {
-			a.hoverBtn, a.hoverClose = overBtn, overClose
+		x, y := mouseX(lparam), mouseY(lparam)
+		hit := a.launcherHit(x, y)
+		if hit != a.launcherHover {
+			a.launcherHover = hit
+			a.hoverBtn = hit == 1
+			a.hoverBrowse = hit == 2
+			a.hoverClose = hit == 6
 			a.invalidateBar()
 		}
-		var tme TRACKMOUSEEVENT
-		tme.CbSize = uint32(unsafe.Sizeof(tme))
-		tme.DwFlags = TME_LEAVE
-		tme.HwndTrack = hwnd
+		tme := TRACKMOUSEEVENT{CbSize: uint32(unsafe.Sizeof(TRACKMOUSEEVENT{})), DwFlags: TME_LEAVE, HwndTrack: hwnd}
 		pTrackMouseEvent.Call(uintptr(unsafe.Pointer(&tme)))
 		return 0
 	case WM_MOUSELEAVE:
-		a.hoverBtn, a.hoverClose = false, false
+		a.launcherHover = 0
+		a.hoverBtn, a.hoverBrowse, a.hoverClose = false, false, false
 		a.invalidateBar()
 		return 0
 	case WM_SETCURSOR:
 		var pt POINT
-		pGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
 		var rc RECT
+		pGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
 		pGetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&rc)))
-		x, y := pt.X-rc.Left, pt.Y-rc.Top
-		if pointIn(a.btnRect, x, y) || pointIn(a.closeRect, x, y) {
-			h, _, _ := pLoadCursorW.Call(0, IDC_HAND)
-			pSetCursor.Call(h)
+		if a.launcherHit(pt.X-rc.Left, pt.Y-rc.Top) > 0 {
+			pSetCursor.Call(loadCursor(IDC_HAND))
 			return 1
 		}
 	case WM_LBUTTONDOWN:
-		x, y := loword(lparam), hiword(lparam)
-		if pointIn(a.btnRect, x, y) {
-			a.pressBtn = true
+		a.launcherPress = a.launcherHit(mouseX(lparam), mouseY(lparam))
+		if a.launcherPress > 0 {
 			pSetCapture.Call(hwnd)
 			a.invalidateBar()
-			return 0
-		}
-		if pointIn(a.closeRect, x, y) {
-			a.hideBar(true)
 			return 0
 		}
 		pReleaseCapture.Call()
 		pSendMessageW.Call(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0)
 		return 0
 	case WM_LBUTTONUP:
-		x, y := loword(lparam), hiword(lparam)
+		pressed := a.launcherPress
+		a.launcherPress = 0
 		pReleaseCapture.Call()
-		if a.pressBtn {
-			a.pressBtn = false
-			a.invalidateBar()
-			if pointIn(a.btnRect, x, y) {
-				a.submit()
-			}
+		a.invalidateBar()
+		if pressed > 0 && pressed == a.launcherHit(mouseX(lparam), mouseY(lparam)) {
+			a.launcherAction(pressed)
 		}
 		return 0
+	case WM_CAPTURECHANGED, WM_CANCELMODE:
+		a.launcherPress = 0
+		a.invalidateBar()
+		return 0
+	case WM_SETFOCUS, WM_KILLFOCUS:
+		a.invalidateBar()
+		return 0
 	case WM_KEYDOWN:
-		if wparam == VK_ESCAPE {
-			a.hideBar(true)
+		if wparam == VK_TAB {
+			a.cycleLauncherFocus()
 			return 0
 		}
-		if wparam == VK_RETURN {
-			a.submit()
+		if wparam == VK_SPACE || wparam == VK_RETURN {
+			a.launcherAction(a.launcherFocus)
+			return 0
+		}
+		if wparam == VK_ESCAPE {
+			a.hideBar(true)
 			return 0
 		}
 	case WM_CTLCOLOREDIT:
@@ -226,9 +261,10 @@ func (a *App) createEdit() {
 	}
 	a.editHwnd = hwnd
 	editHwnd := hwnd
+	pSendMessageW.Call(editHwnd, EM_SETLIMITTEXT, 8000, 0)
 	pSendMessageW.Call(editHwnd, WM_SETFONT, a.fontBody, 1)
 	pSendMessageW.Call(editHwnd, EM_SETMARGINS, EC_LEFTMARGIN|EC_RIGHTMARGIN, makeLong(int32(10*a.scale), int32(10*a.scale)))
-	pSendMessageW.Call(editHwnd, EM_SETCUEBANNER, 1, uintptr(unsafe.Pointer(u16("https://www.youtube.com/watch?v=…"))))
+	pSendMessageW.Call(editHwnd, EM_SETCUEBANNER, 1, uintptr(unsafe.Pointer(u16("Paste a YouTube link…"))))
 	r, _, _ := pSetWindowLongPtrW.Call(editHwnd, GWLP_WNDPROC, editProcCB)
 	if r != 0 {
 		oldEditProc = r
@@ -244,28 +280,19 @@ func (a *App) layoutBar() {
 	w, h := rc.Right, rc.Bottom
 	s := a.scale
 
-	a.editRect = RECT{
-		Left:   int32(24 * s),
-		Top:    int32(44 * s),
-		Right:  int32(float64(w) - 148*s),
-		Bottom: int32(84 * s),
-	}
-	a.btnRect = RECT{
-		Left:   int32(float64(w) - 128*s),
-		Top:    int32(44 * s),
-		Right:  int32(float64(w) - 24*s),
-		Bottom: int32(84 * s),
-	}
-	a.closeRect = RECT{
-		Left:   int32(float64(w) - 48*s),
-		Top:    int32(10 * s),
-		Right:  int32(float64(w) - 14*s),
-		Bottom: int32(42 * s),
+	a.editRect = RECT{Left: int32(24 * s), Top: int32(104 * s), Right: w - int32(136*s), Bottom: int32(152 * s)}
+	a.btnRect = RECT{Left: w - int32(124*s), Top: int32(104 * s), Right: w - int32(24*s), Bottom: int32(152 * s)}
+	a.closeRect = RECT{Left: w - int32(50*s), Top: int32(14 * s), Right: w - int32(18*s), Bottom: int32(46 * s)}
+	a.browseRect = RECT{Left: int32(24 * s), Top: int32(190 * s), Right: int32(188 * s), Bottom: int32(228 * s)}
+	a.controlsRect = RECT{Left: int32(200 * s), Top: int32(190 * s), Right: int32(348 * s), Bottom: int32(228 * s)}
+	for i := range a.recentRect {
+		y := float64(278 + i*54)
+		a.recentRect[i] = RECT{Left: int32(24 * s), Top: int32(y * s), Right: w - int32(24*s), Bottom: int32((y + 48) * s)}
 	}
 
 	if a.editHwnd != 0 {
 		mx := int32(12 * s)
-		my := int32(9 * s)
+		my := int32(13 * s)
 		pMoveWindow.Call(a.editHwnd,
 			uintptr(a.editRect.Left+mx), uintptr(a.editRect.Top+my),
 			uintptr(rectW(a.editRect)-2*mx), uintptr(rectH(a.editRect)-2*my), 1)
@@ -324,56 +351,122 @@ func (a *App) paintBar(hdc uintptr) {
 	pSelectObject.Call(mem, pGetStockObject2(NULL_BRUSH))
 	round(RECT{Left: 1, Top: 1, Right: w - 1, Bottom: h - 1}, a.penBorder, pGetStockObject2(NULL_BRUSH), 16*s)
 
-	// Title.
-	pSelectObject.Call(mem, a.fontTitle)
-	pSetTextColor.Call(mem, colText)
+	// A quiet header, one clear primary action and a separate browsing path.
 	pSetBkMode.Call(mem, TRANSPARENT)
-	drawText(mem, "Paste a YouTube link",
-		RECT{Left: int32(24 * s), Top: int32(14 * s), Right: w - int32(60*s), Bottom: int32(38 * s)},
-		DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX)
+	pSelectObject.Call(mem, a.brAccent)
+	pSelectObject.Call(mem, pGetStockObject2(NULL_PEN))
+	pRoundRect.Call(mem, uintptr(int32(24*s)), uintptr(int32(25*s)), uintptr(int32(56*s)), uintptr(int32(57*s)), uintptr(int32(10*s)), uintptr(int32(10*s)))
+	pSelectObject.Call(mem, a.brBg)
+	pts := []POINT{{int32(36 * s), int32(33 * s)}, {int32(36 * s), int32(49 * s)}, {int32(47 * s), int32(41 * s)}}
+	pPolygon.Call(mem, uintptr(unsafe.Pointer(&pts[0])), 3)
+	pSelectObject.Call(mem, a.fontBrand)
+	pSetTextColor.Call(mem, colText)
+	drawText(mem, "YTFrame", RECT{Left: int32(68 * s), Top: int32(20 * s), Right: w - int32(60*s), Bottom: int32(58 * s)}, DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX)
+	pSelectObject.Call(mem, a.fontBody)
+	pSetTextColor.Call(mem, colMuted)
+	drawText(mem, "Play a link. Keep your screen clear.", RECT{Left: int32(24 * s), Top: int32(66 * s), Right: w - int32(24*s), Bottom: int32(91 * s)}, DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX)
 
-	// Field behind the edit control.
-	round(a.editRect, a.penField, a.brField, 10*s)
-
-	// Button.
+	fieldPen := a.penField
+	if focus, _, _ := pGetFocus.Call(); focus == a.editHwnd {
+		fieldPen = a.penFocus
+	}
+	if a.statusErr {
+		fieldPen = a.penError
+	}
+	round(a.editRect, fieldPen, a.brField, 10*s)
 	br := a.brAccent
 	if a.hoverBtn {
 		br = a.brAccentHover
 	}
-	if a.pressBtn {
-		br = a.penField
+	if a.launcherPress == 1 {
 		br = a.brField
 	}
 	round(a.btnRect, pGetStockObject2(NULL_PEN), br, 10*s)
-	pSelectObject.Call(mem, a.fontBody)
+	pSelectObject.Call(mem, a.fontTitle)
 	pSetTextColor.Call(mem, colDark)
-	drawText(mem, "Play", a.btnRect, DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX)
+	if a.launcherPress == 1 {
+		pSetTextColor.Call(mem, colText)
+	}
+	label := "Play  →"
+	if a.loading {
+		label = "Cancel  ■"
+	}
+	drawText(mem, label, a.btnRect, DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX)
 
-	// Close glyph.
 	pSelectObject.Call(mem, a.fontClose)
+	pSetTextColor.Call(mem, colMuted)
 	if a.hoverClose {
 		pSetTextColor.Call(mem, colText)
-	} else {
-		pSetTextColor.Call(mem, colMuted)
 	}
 	drawText(mem, "×", a.closeRect, DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX)
 
-	// Hint / status.
+	br = a.brBg
+	if a.hoverBrowse || a.launcherPress == 2 {
+		br = a.brField
+	}
+	round(a.browseRect, a.penBorder, br, 9*s)
+	pSelectObject.Call(mem, a.fontTitle)
+	pSetTextColor.Call(mem, colText)
+	drawText(mem, "Browse YouTube", a.browseRect, DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX)
+	br = a.brBg
+	if a.launcherHover == 3 || a.launcherPress == 3 {
+		br = a.brField
+	}
+	round(a.controlsRect, a.penBorder, br, 9*s)
+	pSelectObject.Call(mem, a.fontTitle)
+	pSetTextColor.Call(mem, colText)
+	drawText(mem, "Show controls", a.controlsRect, DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX)
 	pSelectObject.Call(mem, a.fontHint)
+	pSetTextColor.Call(mem, colMuted)
+	drawText(mem, "Ctrl+Alt+B", RECT{Left: int32(362 * s), Top: int32(190 * s), Right: w - int32(24*s), Bottom: int32(228 * s)}, DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX)
+	fillRect(mem, RECT{Left: int32(24 * s), Top: int32(248 * s), Right: w - int32(24*s), Bottom: int32(249 * s)}, a.brField)
+	pSelectObject.Call(mem, a.fontHint)
+	pSetTextColor.Call(mem, colMuted)
+	drawText(mem, "RECENT VIDEOS", RECT{Left: int32(24 * s), Top: int32(252 * s), Right: w - int32(24*s), Bottom: int32(274 * s)}, DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX)
+	if a.recentCount == 0 {
+		drawText(mem, "Your recently played videos will appear here.", RECT{Left: int32(24 * s), Top: int32(286 * s), Right: w - int32(24*s), Bottom: int32(314 * s)}, DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX)
+
+	}
+	for i := 0; i < a.recentCount; i++ {
+		r := a.recentRect[i]
+		br := a.brBg
+		if a.launcherHover == 4+i || a.launcherPress == 4+i {
+			br = a.brField
+		}
+		round(r, pGetStockObject2(NULL_PEN), br, 8*s)
+		e := a.recent[i]
+		title := e.Title
+		if title == "" {
+			title = e.URL
+		}
+		pSelectObject.Call(mem, a.fontTitle)
+		pSetTextColor.Call(mem, colText)
+		drawText(mem, title, RECT{Left: r.Left + int32(12*s), Top: r.Top + int32(3*s), Right: r.Right - int32(180*s), Bottom: r.Top + int32(25*s)}, DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX)
+		pSelectObject.Call(mem, a.fontHint)
+		pSetTextColor.Call(mem, colMuted)
+		label := "Play again"
+		if e.Pos >= 10 && e.Pos < e.Dur-20 {
+			label = "Continue at " + clockStr(e.Pos)
+		}
+		drawText(mem, label, RECT{Left: r.Left + int32(12*s), Top: r.Top + int32(25*s), Right: r.Right - int32(12*s), Bottom: r.Bottom - int32(2*s)}, DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX)
+		pSetTextColor.Call(mem, colAccent)
+		drawText(mem, "Play  →", RECT{Left: r.Right - int32(100*s), Top: r.Top, Right: r.Right - int32(12*s), Bottom: r.Bottom}, DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX)
+	}
+
 	if a.status != "" {
+		pSetTextColor.Call(mem, colMuted)
 		if a.statusErr {
 			pSetTextColor.Call(mem, colError)
-		} else {
-			pSetTextColor.Call(mem, colMuted)
 		}
-		drawText(mem, a.status,
-			RECT{Left: int32(24 * s), Top: int32(96 * s), Right: w - int32(24*s), Bottom: int32(126 * s)},
-			DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX)
-	} else {
-		pSetTextColor.Call(mem, colMuted)
-		drawText(mem, "Enter play  ·  Esc close  ·  Ctrl+Alt+V paste  ·  Ctrl+Alt+B controls",
-			RECT{Left: int32(24 * s), Top: int32(96 * s), Right: w - int32(24*s), Bottom: int32(126 * s)},
-			DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX)
+		drawText(mem, a.status, RECT{Left: int32(24 * s), Top: int32(156 * s), Right: w - int32(24*s), Bottom: int32(182 * s)}, DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX)
+	}
+	if focus, _, _ := pGetFocus.Call(); focus == a.barHwnd && a.launcherFocus > 0 {
+		r := a.launcherFocusRect(a.launcherFocus)
+		r.Left -= int32(3 * s)
+		r.Right += int32(3 * s)
+		r.Top -= int32(3 * s)
+		r.Bottom += int32(3 * s)
+		round(r, a.penFocus, pGetStockObject2(NULL_BRUSH), 11*s)
 	}
 
 	pBitBlt.Call(hdc, 0, 0, uintptr(w), uintptr(h), mem, 0, 0, SRCCOPY)
@@ -394,4 +487,98 @@ func drawText(hdc uintptr, s string, r RECT, flags uint32) {
 		uintptr(len(u)-1),
 		uintptr(unsafe.Pointer(&r)),
 		uintptr(flags))
+}
+
+// The drawn launcher actions participate in keyboard navigation, including Shift+Tab.
+func (a *App) cycleLauncherFocus() {
+	shift, _, _ := pGetKeyState.Call(VK_SHIFT)
+	if focus, _, _ := pGetFocus.Call(); focus == a.editHwnd {
+		a.launcherFocus = 0
+	}
+	ids := []int{0, 1, 2, 3}
+	for i := 0; i < a.recentCount; i++ {
+		ids = append(ids, 4+i)
+	}
+	ids = append(ids, 6)
+	at := 0
+	for i, id := range ids {
+		if id == a.launcherFocus {
+			at = i
+			break
+		}
+	}
+	step := 1
+	if int16(shift) < 0 {
+		step = -1
+	}
+	a.launcherFocus = ids[(at+step+len(ids))%len(ids)]
+	if a.launcherFocus == 0 {
+		pSetFocus.Call(a.editHwnd)
+	} else {
+		pSetFocus.Call(a.barHwnd)
+	}
+	a.invalidateBar()
+}
+
+func (a *App) launcherFocusRect(id int) RECT {
+	switch id {
+	case 1:
+		return a.btnRect
+	case 2:
+		return a.browseRect
+	case 3:
+		return a.controlsRect
+	case 4, 5:
+		return a.recentRect[id-4]
+	case 6:
+		return a.closeRect
+	}
+	return RECT{}
+}
+func (a *App) launcherHit(x, y int32) int {
+	for _, id := range []int{1, 2, 3, 6, 4, 5} {
+		if id >= 4 && id <= 5 && id-4 >= a.recentCount {
+			continue
+		}
+		if pointIn(a.launcherFocusRect(id), x, y) {
+			return id
+		}
+	}
+	return 0
+}
+func (a *App) launcherAction(id int) {
+	switch id {
+	case 2:
+		a.hideBar(true)
+		a.openBrowse()
+	case 3:
+		a.setControlBarVisible(true)
+		a.showControlBar()
+	case 4, 5:
+		if id-4 < a.recentCount {
+			a.startPlayback(a.recent[id-4].URL, true)
+		}
+	case 6:
+		a.hideBar(true)
+	default:
+		a.submit()
+	}
+}
+func (a *App) refreshRecent() {
+	entries := recentEntries(a.history, 2)
+	a.recentCount = len(entries)
+	for i, e := range entries {
+		a.recent[i] = e
+	}
+}
+
+func (a *App) launcherHeight() float64 {
+	switch a.recentCount {
+	case 0:
+		return 326
+	case 1:
+		return 348
+	default:
+		return launcherH
+	}
 }

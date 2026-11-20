@@ -215,3 +215,25 @@ func resumeStart(raw string, h *History) int {
 }
 
 func nowUnix() int64 { return time.Now().Unix() }
+
+func recentEntries(h *History, limit int) []HistoryEntry {
+	if h == nil || limit <= 0 {
+		return nil
+	}
+	entries := make([]HistoryEntry, 0, len(h.Entries))
+	for _, e := range h.Entries {
+		if e.URL != "" {
+			entries = append(entries, e)
+		}
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].Updated == entries[j].Updated {
+			return entries[i].URL < entries[j].URL
+		}
+		return entries[i].Updated > entries[j].Updated
+	})
+	if len(entries) > limit {
+		entries = entries[:limit]
+	}
+	return entries
+}

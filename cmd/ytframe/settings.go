@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const appVersion = "1.2.0"
+const appVersion = "1.3.0"
 
 const layoutSlots = 5
 
@@ -75,10 +75,9 @@ func dataDir() string {
 	exe, err := os.Executable()
 	if err == nil {
 		dir := filepath.Dir(exe)
-		test := filepath.Join(dir, ".write-test")
-		if f, err := os.Create(test); err == nil {
+		if f, err := os.CreateTemp(dir, ".ytframe-write-*"); err == nil {
 			f.Close()
-			os.Remove(test)
+			os.Remove(f.Name())
 			return dir
 		}
 	}
@@ -155,7 +154,7 @@ func logf(format string, args ...interface{}) {
 	defer logMu.Unlock()
 	if logFile != nil {
 		fmt.Fprintf(logFile, "%s %s\n", time.Now().Format("2006-01-02 15:04:05"), line)
-		logFile.Sync()
+		// Let the OS buffer diagnostics; fsync on every UI event stalls playback.
 	}
 	fmt.Fprintf(os.Stderr, "ytframe: %s\n", line)
 }
@@ -167,4 +166,13 @@ func closeLog() {
 		logFile.Close()
 		logFile = nil
 	}
+}
+
+// Program files stay beside the exe even when mutable data falls back to LocalAppData.
+func bundledPath(name string) string {
+	exe, err := os.Executable()
+	if err != nil {
+		return filepath.Join(dataDirPath, name)
+	}
+	return filepath.Join(filepath.Dir(exe), name)
 }

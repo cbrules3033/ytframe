@@ -4,8 +4,12 @@ package main
 
 import (
 	"bufio"
+	"context"
+	"io"
+
 	"encoding/json"
 	"fmt"
+	"github.com/Microsoft/go-winio"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,14 +25,15 @@ type Player struct {
 	app *App
 	id  int
 
-	mu       sync.Mutex
-	cmd      *exec.Cmd
-	hwnd     uintptr
-	conn     *os.File
-	cmdCh    chan []byte
-	running  bool
-	done     chan struct{}
-	quitting bool
+	mu            sync.Mutex
+	cmd           *exec.Cmd
+	hwnd          uintptr
+	conn          io.ReadWriteCloser
+	cmdCh         chan []byte
+	running       bool
+	done          chan struct{}
+	quitting      bool
+	findingWindow bool
 
 	dwidth, dheight int
 	duration        float64
@@ -39,6 +44,8 @@ type Player struct {
 	playlistCount   int
 	playlistPos     int
 	pause           bool
+	buffering       bool
+	bufferPercent   float64
 	fullscreen      bool
 	ontop           bool
 	mute            bool
@@ -49,6 +56,10 @@ type Player struct {
 	eof             bool
 	eofPosted       bool
 	loadNotified    bool
+	processStarted  time.Time
+	loadStarted     time.Time
+	firstFrame      bool
+	resolver        string
 }
 
 func newPlayer(a *App) *Player {
@@ -58,15 +69,20 @@ func newPlayer(a *App) *Player {
 }
 
 func (p *Player) pipeName() string {
-	return fmt.Sprintf(`\\.\pipe\ytframe-%d`, os.Getpid())
+	return fmt.Sprintf(`\\.\pipe\ytframe-%d-%d`, os.Getpid(), p.id)
 }
 
 func (p *Player) start(url string, startSec int) error {
-	mpvPath := filepath.Join(dataDirPath, "mpv.exe")
+	mpvPath := bundledPath("mpv.exe")
 	if _, err := os.Stat(mpvPath); err != nil {
 		return fmt.Errorf("mpv.exe is missing from the YTFrame folder")
 	}
-	ytdlpPath := filepath.Join(dataDirPath, "yt-dlp.exe")
+	ytdlpPath := resolverPath()
+	p.resolver = ytdlpPath
+	p.processStarted = time.Now()
+	if url != "" {
+		p.loadStarted = p.processStarted
+	}
 
 	writeInputConf(filepath.Join(dataDirPath, "input.conf"))
 
@@ -79,7 +95,7 @@ func (p *Player) start(url string, startSec int) error {
 		"--osd-level=1",
 		"--osd-duration=1000",
 		"--no-terminal",
-		"--force-window=immediate",
+		"--force-window=no",
 		"--keep-open=yes",
 		"--idle=yes",
 		"--auto-window-resize=no",
@@ -134,7 +150,9 @@ func (p *Player) start(url string, startSec int) error {
 	if extra := strings.TrimSpace(p.app.settings.ExtraArgs); extra != "" {
 		args = append(args, strings.Fields(extra)...)
 	}
-	args = append(args, "--", url)
+	if url != "" {
+		args = append(args, "--force-window=immediate", "--", url)
+	}
 
 	cmd := exec.Command(mpvPath, args...)
 	cmd.Dir = dataDirPath
@@ -164,40 +182,67 @@ func (p *Player) start(url string, startSec int) error {
 
 	go func() {
 		cmd.Wait()
-		close(done)
 		p.mu.Lock()
 		p.running = false
+		conn := p.conn
+		p.conn = nil
+		p.cmdCh = nil
 		p.mu.Unlock()
+		close(done)
+		if conn != nil {
+			conn.Close()
+		}
 		logf("mpv exited id=%d", p.id)
 		postMsg(WM_APP_MPVEXIT, uintptr(p.id), 0)
 	}()
 
 	go p.connectLoop()
-	go p.findWindowLoop(cmd.Process.Pid)
+	if url != "" {
+		p.discoverWindow()
+	}
 	return nil
 }
 
 func (p *Player) connectLoop() {
-	pipe := p.pipeName()
-	access := uint32(syscall.GENERIC_READ | syscall.GENERIC_WRITE)
-	for i := 0; i < 120; i++ {
-		h, err := syscall.CreateFile(u16(pipe), access, FILE_SHARE_READ|FILE_SHARE_WRITE, nil, syscall.OPEN_EXISTING, 0, 0)
-		if err == nil {
-			f := os.NewFile(uintptr(h), "mpv-ipc")
-			ch := make(chan []byte, 64)
-			p.mu.Lock()
-			p.conn = f
-			p.cmdCh = ch
-			p.mu.Unlock()
-			logf("mpv ipc connected")
-			go p.writeLoop(f, ch)
-			p.observeAll()
-			go p.readLoop(f)
-			return
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	go func() {
+		select {
+		case <-p.done:
+			cancel()
+		case <-ctx.Done():
 		}
-		time.Sleep(100 * time.Millisecond)
+	}()
+	// IOCP-backed overlapped handles allow writes while the observer is blocked
+	// reading an idle pipe. A synchronous os.File deadlocks here on Windows.
+	var conn io.ReadWriteCloser
+	var err error
+	for {
+		conn, err = winio.DialPipeContext(ctx, p.pipeName())
+		if err == nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			logf("mpv IPC connection failed: %v", err)
+			return
+		case <-time.After(15 * time.Millisecond):
+		}
 	}
-	logf("mpv ipc connection timed out")
+	ch := make(chan []byte, 64)
+	p.mu.Lock()
+	if !p.running {
+		p.mu.Unlock()
+		conn.Close()
+		return
+	}
+	p.conn, p.cmdCh = conn, ch
+	p.mu.Unlock()
+	logf("timing player=%d stage=ipc elapsed_ms=%d", p.id, time.Since(p.processStarted).Milliseconds())
+	go p.writeLoop(conn, ch)
+	p.observeAll()
+	go p.readLoop(conn)
+	postMsg(WM_APP_MPVREADY, uintptr(p.id), 0)
 }
 
 func (p *Player) observeAll() {
@@ -205,18 +250,20 @@ func (p *Player) observeAll() {
 		"dwidth", "dheight", "duration", "pause", "fullscreen", "ontop",
 		"volume", "mute", "eof-reached", "path", "media-title", "idle-active",
 		"time-pos", "seeking", "playlist-count", "playlist-pos",
+		"paused-for-cache", "cache-buffering-state",
 	}
 	for i, name := range props {
 		p.command("observe_property", i+1, name)
 	}
 }
 
-func (p *Player) readLoop(f *os.File) {
+func (p *Player) readLoop(f io.Reader) {
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	for sc.Scan() {
 		line := sc.Bytes()
 		var m struct {
+			Args   []string        `json:"args"`
 			Event  string          `json:"event"`
 			Name   string          `json:"name"`
 			Data   json.RawMessage `json:"data"`
@@ -227,16 +274,32 @@ func (p *Player) readLoop(f *os.File) {
 			continue
 		}
 		switch m.Event {
+		case "client-message":
+			if len(m.Args) == 1 && m.Args[0] == "ytframe-paste" {
+				postMsg(WM_APP_PASTE, uintptr(p.id), 0)
+			}
 		case "property-change":
 			p.applyProperty(m.Name, m.Data)
+		case "playback-restart":
+			p.mu.Lock()
+			first := !p.firstFrame && !p.loadStarted.IsZero()
+			p.firstFrame = true
+			started := p.loadStarted
+			p.mu.Unlock()
+			if first {
+				logf("timing player=%d stage=first-frame elapsed_ms=%d", p.id, time.Since(started).Milliseconds())
+			}
 		case "file-loaded":
 			p.mu.Lock()
 			already := p.loadNotified
 			p.loadNotified = true
 			p.eof = false
+			p.eofPosted = false
+			started := p.loadStarted
 			p.mu.Unlock()
 			if !already {
-				logf("mpv file-loaded id=%d", p.id)
+				logf("timing player=%d stage=file-loaded elapsed_ms=%d", p.id, time.Since(started).Milliseconds())
+				p.discoverWindow()
 				postMsg(WM_APP_LOADED, uintptr(p.id), 0)
 			}
 		case "end-file":
@@ -303,6 +366,14 @@ func (p *Player) applyProperty(name string, raw json.RawMessage) {
 		if f, ok := num(); ok {
 			p.playlistPos = int(f)
 		}
+	case "paused-for-cache":
+		if b, ok := v.(bool); ok {
+			p.buffering = b
+		}
+	case "cache-buffering-state":
+		if f, ok := num(); ok {
+			p.bufferPercent = f
+		}
 	case "pause":
 		if b, ok := v.(bool); ok {
 			p.pause = b
@@ -345,9 +416,15 @@ func (p *Player) applyProperty(name string, raw json.RawMessage) {
 
 // writeLoop owns the pipe. Commands are queued, so a stalled mpv can never
 // freeze the UI thread; a wedged player is restarted by the load watchdog.
-func (p *Player) writeLoop(f *os.File, ch chan []byte) {
+func (p *Player) writeLoop(f io.Writer, ch chan []byte) {
 	w := bufio.NewWriter(f)
-	for b := range ch {
+	for {
+		var b []byte
+		select {
+		case <-p.done:
+			return
+		case b = <-ch:
+		}
 		if _, err := w.Write(b); err != nil {
 			logf("ipc write failed: %v", err)
 			return
@@ -384,6 +461,8 @@ func (p *Player) command(args ...interface{}) bool {
 func (p *Player) load(url string, startSec int) {
 	p.mu.Lock()
 	p.loadNotified = false
+	p.loadStarted = time.Now()
+	p.firstFrame = false
 	p.eof = false
 	p.eofPosted = false
 	p.endReason = ""
@@ -392,14 +471,25 @@ func (p *Player) load(url string, startSec int) {
 	p.pos = 0
 	p.seeking = false
 	p.title = ""
+	p.duration = 0
+	p.hasDuration = false
 	p.mu.Unlock()
 
-	if startSec > 0 {
-		p.command("loadfile", url, "replace", fmt.Sprintf("start=%d", startSec))
-	} else {
-		p.command("loadfile", url, "replace")
+	// Always override --start, including zero, so the previous video's
+	// command-line resume offset cannot leak into the next load.
+	options := map[string]string{"start": fmt.Sprint(startSec)}
+	if p.app != nil {
+		q := qualityFormat(p.app.settings.Quality)
+		if q == "" {
+			q = "bestvideo+bestaudio/best"
+		}
+		options["ytdl-format"] = q
 	}
-	p.command("set_property", "pause", false)
+	p.command("loadfile", url, "replace", -1, options)
+	p.command("set_property", "force-window", "immediate")
+	pause := p.app != nil && p.app.pendingPause
+	p.command("set_property", "pause", pause)
+	p.discoverWindow()
 	logf("loading %s", url)
 }
 
@@ -420,6 +510,8 @@ func (p *Player) setOntop(on bool) {
 
 type PlayerState struct {
 	Pause         bool
+	Buffering     bool
+	BufferPercent float64
 	Fullscreen    bool
 	Ontop         bool
 	Mute          bool
@@ -440,7 +532,7 @@ func (p *Player) snapshot() PlayerState {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return PlayerState{
-		Pause: p.pause, Fullscreen: p.fullscreen, Ontop: p.ontop,
+		Pause: p.pause, Buffering: p.buffering, BufferPercent: p.bufferPercent, Fullscreen: p.fullscreen, Ontop: p.ontop,
 		Mute: p.mute, Eof: p.eof, Seeking: p.seeking, Running: p.running,
 		Dwidth: p.dwidth, Dheight: p.dheight,
 		Duration: p.duration, Pos: p.pos,
@@ -527,7 +619,12 @@ func (p *Player) quitAndWait(timeout time.Duration) {
 }
 
 func (p *Player) findWindowLoop(pid int) {
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 333; i++ {
+		select {
+		case <-p.done:
+			return
+		default:
+		}
 		if hwnd := findWindowForPID(uint32(pid)); hwnd != 0 {
 			var rc RECT
 			if ok, _, _ := pGetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&rc))); ok != 0 && rectW(rc) > 0 {
@@ -539,7 +636,11 @@ func (p *Player) findWindowLoop(pid int) {
 				return
 			}
 		}
-		time.Sleep(50 * time.Millisecond)
+		select {
+		case <-p.done:
+			return
+		case <-time.After(15 * time.Millisecond):
+		}
 	}
 	logf("mpv window not found")
 }
@@ -583,7 +684,8 @@ func findWindowForPID(pid uint32) uintptr {
 
 func writeInputConf(path string) {
 	content := "# YTFrame: Ctrl+V replaces the current video with the clipboard link\n" +
-		"Ctrl+v loadfile ${clipboard/text}\n"
+		"Ctrl+v script-message ytframe-paste\n" +
+		"UP add volume 5\nDOWN add volume -5\nHOME seek 0 absolute+exact\n"
 	if b, err := os.ReadFile(path); err == nil && string(b) == content {
 		return
 	}
@@ -671,4 +773,26 @@ func qualityFormat(q string) string {
 		return "bestvideo[height<=480]+bestaudio/best[height<=480]/best"
 	}
 	return ""
+}
+
+func (p *Player) stop() {
+	p.mu.Lock()
+	p.url, p.title = "", ""
+	p.duration, p.pos = 0, 0
+	p.hasDuration, p.loadNotified, p.firstFrame = false, false, false
+	p.mu.Unlock()
+	p.command("stop")
+	p.command("set_property", "force-window", "no")
+}
+
+func (p *Player) discoverWindow() {
+	p.mu.Lock()
+	if p.findingWindow || p.hwnd != 0 || !p.running || p.cmd == nil {
+		p.mu.Unlock()
+		return
+	}
+	p.findingWindow = true
+	pid := p.cmd.Process.Pid
+	p.mu.Unlock()
+	go func() { defer func() { p.mu.Lock(); p.findingWindow = false; p.mu.Unlock() }(); p.findWindowLoop(pid) }()
 }

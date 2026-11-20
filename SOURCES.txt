@@ -1,4 +1,4 @@
-YTFrame 1.0.0 - bundled component sources
+YTFrame 1.3.0 - bundled component sources
 ==========================================
 
 mpv
@@ -11,7 +11,9 @@ mpv
 yt-dlp
   version:  2026.10.26
   source:   https://github.com/yt-dlp/yt-dlp/releases/tag/2026.10.26
-  binary:   https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp.exe
+  binary:   https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp_win.zip
+  note:     official unpacked build; Python is installed once in resolver/
+  sha256:   fd51b212cf8380c7a52ee08c0d6be7f3c59b2f2c832eaf7b45acfae6eab57419
 
 YTFrame
   source:   https://github.com/cbrules3033/ytframe
@@ -25,3 +27,8 @@ WebView2Loader
   source:  Microsoft WebView2 SDK / go-winloader
   note:    embedded in YTFrame.exe; runtime is installed by Windows/Edge
 go-webview2 commit: 56598839c808a2340edee99204db479f410e9bf4
+
+go-winio
+  version: v0.6.1
+  licence: MIT
+  source:  https://github.com/microsoft/go-winio/tree/v0.6.1
