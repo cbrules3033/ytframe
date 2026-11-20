@@ -21,14 +21,15 @@ type Player struct {
 	app *App
 	id  int
 
-	mu       sync.Mutex
-	cmd      *exec.Cmd
-	hwnd     uintptr
-	conn     *os.File
-	cmdCh    chan []byte
-	running  bool
-	done     chan struct{}
-	quitting bool
+	mu            sync.Mutex
+	cmd           *exec.Cmd
+	hwnd          uintptr
+	conn          *os.File
+	cmdCh         chan []byte
+	running       bool
+	done          chan struct{}
+	quitting      bool
+	findingWindow bool
 
 	dwidth, dheight int
 	duration        float64
@@ -39,6 +40,8 @@ type Player struct {
 	playlistCount   int
 	playlistPos     int
 	pause           bool
+	buffering       bool
+	bufferPercent   float64
 	fullscreen      bool
 	ontop           bool
 	mute            bool
@@ -49,6 +52,10 @@ type Player struct {
 	eof             bool
 	eofPosted       bool
 	loadNotified    bool
+	processStarted  time.Time
+	loadStarted     time.Time
+	firstFrame      bool
+	resolver        string
 }
 
 func newPlayer(a *App) *Player {
@@ -66,7 +73,12 @@ func (p *Player) start(url string, startSec int) error {
 	if _, err := os.Stat(mpvPath); err != nil {
 		return fmt.Errorf("mpv.exe is missing from the YTFrame folder")
 	}
-	ytdlpPath := bundledPath("yt-dlp.exe")
+	ytdlpPath := resolverPath()
+	p.resolver = ytdlpPath
+	p.processStarted = time.Now()
+	if url != "" {
+		p.loadStarted = p.processStarted
+	}
 
 	writeInputConf(filepath.Join(dataDirPath, "input.conf"))
 
@@ -79,7 +91,7 @@ func (p *Player) start(url string, startSec int) error {
 		"--osd-level=1",
 		"--osd-duration=1000",
 		"--no-terminal",
-		"--force-window=immediate",
+		"--force-window=no",
 		"--keep-open=yes",
 		"--idle=yes",
 		"--auto-window-resize=no",
@@ -134,7 +146,9 @@ func (p *Player) start(url string, startSec int) error {
 	if extra := strings.TrimSpace(p.app.settings.ExtraArgs); extra != "" {
 		args = append(args, strings.Fields(extra)...)
 	}
-	args = append(args, "--", url)
+	if url != "" {
+		args = append(args, "--force-window=immediate", "--", url)
+	}
 
 	cmd := exec.Command(mpvPath, args...)
 	cmd.Dir = dataDirPath
@@ -179,14 +193,17 @@ func (p *Player) start(url string, startSec int) error {
 	}()
 
 	go p.connectLoop()
-	go p.findWindowLoop(cmd.Process.Pid)
+	if url != "" {
+		p.discoverWindow()
+	}
 	return nil
 }
 
 func (p *Player) connectLoop() {
 	pipe := p.pipeName()
 	access := uint32(syscall.GENERIC_READ | syscall.GENERIC_WRITE)
-	for i := 0; i < 120; i++ {
+	deadline := time.Now().Add(12 * time.Second)
+	for time.Now().Before(deadline) {
 		select {
 		case <-p.done:
 			return
@@ -205,13 +222,18 @@ func (p *Player) connectLoop() {
 			p.conn = f
 			p.cmdCh = ch
 			p.mu.Unlock()
-			logf("mpv ipc connected")
+			logf("timing player=%d stage=ipc elapsed_ms=%d", p.id, time.Since(p.processStarted).Milliseconds())
 			go p.writeLoop(f, ch)
 			p.observeAll()
 			go p.readLoop(f)
+			postMsg(WM_APP_MPVREADY, uintptr(p.id), 0)
 			return
 		}
-		time.Sleep(100 * time.Millisecond)
+		select {
+		case <-p.done:
+			return
+		case <-time.After(15 * time.Millisecond):
+		}
 	}
 	logf("mpv ipc connection timed out")
 }
@@ -221,6 +243,7 @@ func (p *Player) observeAll() {
 		"dwidth", "dheight", "duration", "pause", "fullscreen", "ontop",
 		"volume", "mute", "eof-reached", "path", "media-title", "idle-active",
 		"time-pos", "seeking", "playlist-count", "playlist-pos",
+		"paused-for-cache", "cache-buffering-state",
 	}
 	for i, name := range props {
 		p.command("observe_property", i+1, name)
@@ -250,6 +273,15 @@ func (p *Player) readLoop(f *os.File) {
 			}
 		case "property-change":
 			p.applyProperty(m.Name, m.Data)
+		case "playback-restart":
+			p.mu.Lock()
+			first := !p.firstFrame && !p.loadStarted.IsZero()
+			p.firstFrame = true
+			started := p.loadStarted
+			p.mu.Unlock()
+			if first {
+				logf("timing player=%d stage=first-frame elapsed_ms=%d", p.id, time.Since(started).Milliseconds())
+			}
 		case "file-loaded":
 			p.mu.Lock()
 			already := p.loadNotified
@@ -258,7 +290,8 @@ func (p *Player) readLoop(f *os.File) {
 			p.eofPosted = false
 			p.mu.Unlock()
 			if !already {
-				logf("mpv file-loaded id=%d", p.id)
+				logf("timing player=%d stage=file-loaded elapsed_ms=%d", p.id, time.Since(p.loadStarted).Milliseconds())
+				p.discoverWindow()
 				postMsg(WM_APP_LOADED, uintptr(p.id), 0)
 			}
 		case "end-file":
@@ -324,6 +357,14 @@ func (p *Player) applyProperty(name string, raw json.RawMessage) {
 	case "playlist-pos":
 		if f, ok := num(); ok {
 			p.playlistPos = int(f)
+		}
+	case "paused-for-cache":
+		if b, ok := v.(bool); ok {
+			p.buffering = b
+		}
+	case "cache-buffering-state":
+		if f, ok := num(); ok {
+			p.bufferPercent = f
 		}
 	case "pause":
 		if b, ok := v.(bool); ok {
@@ -412,6 +453,8 @@ func (p *Player) command(args ...interface{}) bool {
 func (p *Player) load(url string, startSec int) {
 	p.mu.Lock()
 	p.loadNotified = false
+	p.loadStarted = time.Now()
+	p.firstFrame = false
 	p.eof = false
 	p.eofPosted = false
 	p.endReason = ""
@@ -427,7 +470,9 @@ func (p *Player) load(url string, startSec int) {
 	// Always override --start, including zero, so the previous video's
 	// command-line resume offset cannot leak into the next load.
 	p.command("loadfile", url, "replace", -1, map[string]string{"start": fmt.Sprint(startSec)})
+	p.command("set_property", "force-window", "immediate")
 	p.command("set_property", "pause", false)
+	p.discoverWindow()
 	logf("loading %s", url)
 }
 
@@ -448,6 +493,8 @@ func (p *Player) setOntop(on bool) {
 
 type PlayerState struct {
 	Pause         bool
+	Buffering     bool
+	BufferPercent float64
 	Fullscreen    bool
 	Ontop         bool
 	Mute          bool
@@ -468,7 +515,7 @@ func (p *Player) snapshot() PlayerState {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return PlayerState{
-		Pause: p.pause, Fullscreen: p.fullscreen, Ontop: p.ontop,
+		Pause: p.pause, Buffering: p.buffering, BufferPercent: p.bufferPercent, Fullscreen: p.fullscreen, Ontop: p.ontop,
 		Mute: p.mute, Eof: p.eof, Seeking: p.seeking, Running: p.running,
 		Dwidth: p.dwidth, Dheight: p.dheight,
 		Duration: p.duration, Pos: p.pos,
@@ -555,7 +602,12 @@ func (p *Player) quitAndWait(timeout time.Duration) {
 }
 
 func (p *Player) findWindowLoop(pid int) {
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 333; i++ {
+		select {
+		case <-p.done:
+			return
+		default:
+		}
 		if hwnd := findWindowForPID(uint32(pid)); hwnd != 0 {
 			var rc RECT
 			if ok, _, _ := pGetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&rc))); ok != 0 && rectW(rc) > 0 {
@@ -567,7 +619,11 @@ func (p *Player) findWindowLoop(pid int) {
 				return
 			}
 		}
-		time.Sleep(50 * time.Millisecond)
+		select {
+		case <-p.done:
+			return
+		case <-time.After(15 * time.Millisecond):
+		}
 	}
 	logf("mpv window not found")
 }
@@ -700,4 +756,26 @@ func qualityFormat(q string) string {
 		return "bestvideo[height<=480]+bestaudio/best[height<=480]/best"
 	}
 	return ""
+}
+
+func (p *Player) stop() {
+	p.mu.Lock()
+	p.url, p.title = "", ""
+	p.duration, p.pos = 0, 0
+	p.hasDuration, p.loadNotified, p.firstFrame = false, false, false
+	p.mu.Unlock()
+	p.command("stop")
+	p.command("set_property", "force-window", "no")
+}
+
+func (p *Player) discoverWindow() {
+	p.mu.Lock()
+	if p.findingWindow || p.hwnd != 0 || !p.running || p.cmd == nil {
+		p.mu.Unlock()
+		return
+	}
+	p.findingWindow = true
+	pid := p.cmd.Process.Pid
+	p.mu.Unlock()
+	go func() { defer func() { p.mu.Lock(); p.findingWindow = false; p.mu.Unlock() }(); p.findWindowLoop(pid) }()
 }

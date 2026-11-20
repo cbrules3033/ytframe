@@ -10,6 +10,9 @@ function Fetch-Verified($Url, $Path, $SHA256) {
 New-Item -ItemType Directory -Force bundle | Out-Null
 Fetch-Verified 'https://github.com/zhongfly/mpv-winbuild/releases/download/2026-11-18-f92afa75cd/mpv-x86_64-20261118-git-f92afa75cd.7z' 'bundle/mpv.7z' '6c99e301d8fd858deeda6ebe3328a74c6a9d76ac69ae63cbcc80ea634d00cb38'
 Fetch-Verified 'https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp.exe' 'bundle/yt-dlp.exe' 'f5389d3698ecde4ef06f4e6b1ce0294fe9ac1396228c8990b8d3416d6d177a7d'
+Fetch-Verified 'https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp_win.zip' 'bundle/yt-dlp_win.zip' 'fd51b212cf8380c7a52ee08c0d6be7f3c59b2f2c832eaf7b45acfae6eab57419'
+& 7z x bundle/yt-dlp_win.zip '-obundle/resolver' -y | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'Resolver extraction failed' }
 & 7z e bundle/mpv.7z '-obundle' mpv.exe -y | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'mpv extraction failed' }
 # Stage separately so rebuilding never erases a portable install's settings/profile.
@@ -21,7 +24,9 @@ $env:GOOS = 'windows'
 $env:GOARCH = 'amd64'
 & go build -buildvcs=false -trimpath -ldflags '-H windowsgui -s -w' -o "$Stage/YTFrame.exe" ./cmd/ytframe
 if ($LASTEXITCODE -ne 0) { throw 'Go build failed' }
-Copy-Item bundle/mpv.exe,bundle/yt-dlp.exe,README.txt,LICENSES.txt,SOURCES.txt,LICENSE,LICENSE.GPL-2.0 $Stage
+Copy-Item bundle/mpv.exe,README.txt,LICENSES.txt,SOURCES.txt,LICENSE,LICENSE.GPL-2.0 $Stage
+Copy-Item -Recurse bundle/resolver "$Stage/resolver"
+if ($env:GITHUB_ACTIONS -eq 'true') { & "$PSScriptRoot/benchmark.ps1" -PackagePath $Stage }
 Copy-Item docs/CODE_SIGNING.md "$Stage/CODE_SIGNING.txt"
 $Zip = 'dist/YTFrame-win64.zip'
 if (Test-Path $Zip) { Remove-Item $Zip }

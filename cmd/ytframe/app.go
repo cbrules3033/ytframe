@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unsafe"
@@ -57,6 +58,7 @@ type App struct {
 	pendingFullscreen bool
 	loadingStart      int
 	loadedAt          time.Time
+	loadRequested     time.Time
 	lastTrayTitle     string
 
 	status    string
@@ -87,6 +89,12 @@ type App struct {
 	hoverBrowse   bool
 	pressBrowse   bool
 	launcherFocus int
+	launcherHover int
+	launcherPress int
+	controlsRect  RECT
+	recentRect    [2]RECT
+	recent        [2]HistoryEntry
+	recentCount   int
 	hoverBtn      bool
 	hoverClose    bool
 	pressBtn      bool
@@ -97,6 +105,8 @@ type App struct {
 	backH   int32
 
 	updateResult string
+	updateMu     sync.Mutex
+	updating     bool
 	pollCount    int
 
 	cbHwnd    uintptr
@@ -112,6 +122,7 @@ type App struct {
 	cbBrHover   uintptr
 	cbBrAccent  uintptr
 	cbBrIcon    uintptr
+	cbBrMuted   uintptr
 	cbPenBorder uintptr
 	cbPenIcon   uintptr
 	cbPenMuted  uintptr
@@ -122,28 +133,35 @@ type App struct {
 	cbBackW   int32
 	cbBackH   int32
 
-	cbSeekRect    RECT
-	cbTimeRect    RECT
-	cbVolRect     RECT
-	cbBtn         [cbBtnCount]RECT
-	cbHover       int
-	cbPress       int
-	cbDrag        bool
-	cbDragStart   POINT
-	cbDragRect    RECT
-	cbSeekDrag    bool
-	cbSeekTarget  float64
-	cbVolDrag     bool
-	cbStatus      string
-	cbStatusUntil time.Time
-	cbLastPause   bool
-	cbTitle       string
-	cbLastPos     float64
-	cbLastDur     float64
-	cbLastVol     int
-	cbLastMute    bool
-	videoHidden   bool
-	pendingLayout int
+	cbSeekRect      RECT
+	cbTimeRect      RECT
+	cbVolRect       RECT
+	cbBtn           [cbBtnCount]RECT
+	cbHover         int
+	cbPress         int
+	cbDrag          bool
+	cbDragStart     POINT
+	cbDragRect      RECT
+	cbSeekDrag      bool
+	cbSeekTarget    float64
+	cbVolDrag       bool
+	cbStatus        string
+	cbStatusUntil   time.Time
+	cbLastPause     bool
+	cbTitle         string
+	cbBuffering     bool
+	cbBufferPercent int
+	cbIdle          bool
+	cbLastLoading   bool
+	cbLastTick      int
+	cbPaintCount    uint64
+	cbInvalidations uint64
+	cbLastPos       float64
+	cbLastDur       float64
+	cbLastVol       int
+	cbLastMute      bool
+	videoHidden     bool
+	pendingLayout   int
 
 	browseOpen bool
 	browseCmd  *exec.Cmd
@@ -218,6 +236,10 @@ func main() {
 		app.startPlayback(u, false)
 	} else {
 		app.showBarWith("", "", false)
+		pSetTimer.Call(helperHwnd, TIMER_PREWARM, 200, 0)
+	}
+	if app.settings.BarVisible {
+		app.showControlBar()
 	}
 
 	app.runLoop()
@@ -290,6 +312,15 @@ var helperProcCB = syscall.NewCallback(func(hwnd, msg, wparam, lparam uintptr) u
 			a.startPlayback(clipboardText(), true)
 		}
 		return 0
+	case WM_APP_MPVREADY:
+		if p := a.player; p != nil && p.id == int(wparam) {
+			if a.loading && p.urlNow() != a.loadingURL {
+				p.load(a.loadingURL, a.loadingStart)
+			} else if !a.loading && p.urlNow() == "" {
+				p.stop()
+			}
+		}
+		return 0
 	case WM_APP_SHOWBAR:
 		a.showBar()
 		return 0
@@ -312,7 +343,10 @@ var helperProcCB = syscall.NewCallback(func(hwnd, msg, wparam, lparam uintptr) u
 		a.onBrowseExit()
 		return 0
 	case WM_APP_UPDATEDONE:
+		a.updateMu.Lock()
 		msg := a.updateResult
+		a.updateMu.Unlock()
+		a.updating = false
 		if len(msg) > 1400 {
 			msg = msg[:1400] + "…"
 		}
@@ -353,7 +387,7 @@ func (a *App) createHelperWindow() {
 	helperHwnd = hwnd
 	pSetTimer.Call(hwnd, TIMER_POLL, 2000, 0)
 	pSetTimer.Call(hwnd, TIMER_SPONSOR, 500, 0)
-	pSetTimer.Call(hwnd, TIMER_BAR, 250, 0)
+	pSetTimer.Call(hwnd, TIMER_BAR, 100, 0)
 }
 
 func (a *App) createTray() {
@@ -668,7 +702,7 @@ func (a *App) createBarWindow() {
 	pRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc)))
 
 	w := int32(launcherW * a.scale)
-	h := int32(launcherH * a.scale)
+	h := int32(a.launcherHeight() * a.scale)
 	hwnd, _, _ := pCreateWindowExW.Call(
 		WS_EX_TOPMOST|WS_EX_TOOLWINDOW,
 		uintptr(unsafe.Pointer(u16("YTFrameBar"))),
@@ -693,6 +727,7 @@ func (a *App) showBar() {
 }
 
 func (a *App) showBarWith(prefill, status string, statusErr bool) {
+	a.refreshRecent()
 	if a.barHwnd == 0 {
 		a.createBarWindow()
 	}
@@ -710,7 +745,7 @@ func (a *App) showBarWith(prefill, status string, statusErr bool) {
 	a.statusErr = statusErr
 
 	w := int32(launcherW * a.scale)
-	h := int32(launcherH * a.scale)
+	h := int32(a.launcherHeight() * a.scale)
 	var pt POINT
 	pGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
 	work := workAreaForPoint(pt)
@@ -791,44 +826,11 @@ func (a *App) submit() {
 	if a.editHwnd == 0 {
 		return
 	}
-	raw := getWindowText(a.editHwnd)
-	u, ts, errMsg := normalizeURL(raw)
-	if errMsg != "" {
-		a.setStatus(errMsg, true)
+	if a.loading {
+		a.cancelLoading()
 		return
 	}
-	if a.player != nil && a.player.isRunning() {
-		if a.loading && !a.player.ready() {
-			a.setStatus("Still starting the player…", false)
-			return
-		}
-	}
-	start := a.resumeFor(u, ts)
-	a.saveCurrentPos()
-	a.loading = true
-	a.loadRestarted = false
-	a.loadingURL = u
-	a.loadingStart = start
-	a.retries = 0
-	a.pendingPause = false
-	a.pendingFullscreen = false
-	a.settings.LastURL = u
-	saveSettings(a.settings)
-	a.setStatus("Loading…", false)
-	pSetTimer.Call(helperHwnd, TIMER_LOADWAIT, 30000, 0)
-
-	if a.player == nil || !a.player.isRunning() {
-		if err := a.startPlayer(u, start); err != nil {
-			a.loading = false
-			logf("start failed: %v", err)
-			a.setStatus("Could not start mpv: "+err.Error(), true)
-			messageBox(a.barHwnd, "Could not start the bundled mpv.exe.\n\n"+err.Error(),
-				"YTFrame", MB_OK|MB_ICONERROR)
-			return
-		}
-	} else {
-		a.player.load(u, start)
-	}
+	a.startPlayback(getWindowText(a.editHwnd), true)
 }
 
 func (a *App) startPlayback(raw string, showBarIfError bool) {
@@ -837,26 +839,58 @@ func (a *App) startPlayback(raw string, showBarIfError bool) {
 		a.showBarWith(raw, errMsg, true)
 		return
 	}
-	start := a.resumeFor(u, ts)
 	a.saveCurrentPos()
-	a.loading = true
-	a.loadRestarted = false
-	a.loadingURL = u
-	a.loadingStart = start
+	start := a.resumeFor(u, ts)
+	a.loading, a.loadRestarted = true, false
+	a.loadingURL, a.loadingStart = u, start
+	a.loadRequested = time.Now()
 	a.retries = 0
-	a.pendingPause = false
-	a.pendingFullscreen = false
+	a.pendingPause, a.pendingFullscreen = false, false
 	a.settings.LastURL = u
 	saveSettings(a.settings)
+	a.setStatus("Opening video…", false)
+	pKillTimer.Call(helperHwnd, TIMER_PREWARM)
+	pKillTimer.Call(helperHwnd, TIMER_RETRY)
 	pSetTimer.Call(helperHwnd, TIMER_LOADWAIT, 30000, 0)
+	if a.player != nil && a.player.isRunning() && a.player.resolver != resolverPath() {
+		old := a.player
+		a.player = nil
+		old.killAsync()
+	}
 	if a.player == nil || !a.player.isRunning() {
 		if err := a.startPlayer(u, start); err != nil {
 			a.loading = false
-			logf("start failed: %v", err)
-			a.showBarWith(u, "Could not start mpv: "+err.Error(), true)
+			pKillTimer.Call(helperHwnd, TIMER_LOADWAIT)
+			a.showBarWith(u, "Could not start the player: "+err.Error(), true)
 		}
-	} else {
+	} else if a.player.ready() {
 		a.player.load(u, start)
+	}
+	if a.settings.BarVisible {
+		a.showControlBar()
+	}
+	a.cbInvalidate()
+}
+
+func (a *App) cancelLoading() {
+	a.loading = false
+	a.loadingURL = ""
+	a.pendingPause, a.pendingFullscreen = false, false
+	pKillTimer.Call(helperHwnd, TIMER_LOADWAIT)
+	pKillTimer.Call(helperHwnd, TIMER_RETRY)
+	if p := a.player; p != nil {
+		p.stop()
+	}
+	a.setStatus("Canceled. Ready for another link.", false)
+	a.cbInvalidate()
+}
+
+func (a *App) warmPlayer() {
+	if a.quitting || a.loading || (a.player != nil && a.player.isRunning()) {
+		return
+	}
+	if err := a.startPlayer("", 0); err != nil {
+		logf("player warmup skipped: %v", err)
 	}
 }
 
@@ -875,7 +909,14 @@ func (a *App) handleLoaded(id int) {
 		logf("ignoring stale load event id=%d", id)
 		return
 	}
+	if a.player.urlNow() == "" {
+		a.player.stop()
+		return
+	}
 	wasLoading := a.loading
+	if !a.loadRequested.IsZero() {
+		logf("timing stage=request-to-loaded elapsed_ms=%d", time.Since(a.loadRequested).Milliseconds())
+	}
 	a.loading = false
 	a.eofShown = false
 	a.loadRestarted = false
@@ -968,6 +1009,14 @@ func (a *App) handleMPVExit(id int) {
 		logf("ignoring stale player exit id=%d", id)
 		return
 	}
+	if a.player.urlNow() == "" {
+		a.player = nil
+		a.loading = false
+		if a.settings.BarVisible {
+			a.showControlBar()
+		}
+		return
+	}
 	wasLoading := a.loading
 	a.loading = false
 	pKillTimer.Call(helperHwnd, TIMER_LOADWAIT)
@@ -994,6 +1043,9 @@ func (a *App) handleMPVExit(id int) {
 
 func (a *App) onTimer(id uintptr) {
 	switch id {
+	case TIMER_PREWARM:
+		pKillTimer.Call(helperHwnd, TIMER_PREWARM)
+		a.warmPlayer()
 	case TIMER_POLL:
 		a.pollCount++
 		a.captureRect()
@@ -1189,6 +1241,10 @@ func (a *App) onCopyData(lparam uintptr) {
 	if s == "" {
 		return
 	}
+	if cds.DwData == 3 {
+		a.browseOpen = false
+		return
+	}
 	if cds.DwData == 2 {
 		var x, y, w, h int32
 		if _, err := fmt.Sscanf(s, "%d,%d,%d,%d", &x, &y, &w, &h); err == nil {
@@ -1205,23 +1261,24 @@ func (a *App) onCopyData(lparam uintptr) {
 // ---- misc ----------------------------------------------------------------
 
 func (a *App) updateYtdlp() {
-	path := bundledPath("yt-dlp.exe")
-	if _, err := os.Stat(path); err != nil {
-		messageBox(0, "yt-dlp.exe is missing from the YTFrame folder.", "Update yt-dlp", MB_OK|MB_ICONERROR)
+	if a.loading {
+		a.setBarStatus("Finish or cancel loading before updating")
 		return
 	}
+	if a.updating {
+		a.setBarStatus("Resolver update already in progress")
+		return
+	}
+	a.updating = true
+	a.setBarStatus("Updating video resolver…")
 	go func() {
-		cmd := exec.Command(path, "-U")
-		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: CREATE_NO_WINDOW}
-		out, err := cmd.CombinedOutput()
-		msg := strings.TrimSpace(string(out))
+		err := updateResolver()
+		a.updateMu.Lock()
+		a.updateResult = "Video resolver updated. The next video will use it."
 		if err != nil {
-			msg = "Update failed: " + err.Error() + "\n\n" + msg
+			a.updateResult = "Update failed: " + err.Error()
 		}
-		if msg == "" {
-			msg = "yt-dlp is already up to date."
-		}
-		app.updateResult = msg
+		a.updateMu.Unlock()
 		postMsg(WM_APP_UPDATEDONE, 0, 0)
 	}()
 }

@@ -154,7 +154,7 @@ func logf(format string, args ...interface{}) {
 	defer logMu.Unlock()
 	if logFile != nil {
 		fmt.Fprintf(logFile, "%s %s\n", time.Now().Format("2006-01-02 15:04:05"), line)
-		logFile.Sync()
+		// Let the OS buffer diagnostics; fsync on every UI event stalls playback.
 	}
 	fmt.Fprintf(os.Stderr, "ytframe: %s\n", line)
 }

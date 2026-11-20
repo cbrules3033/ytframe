@@ -41,6 +41,7 @@ type browseWindow struct {
 	container uintptr
 	w         webview2.WebView
 	failed    bool
+	hidden    bool
 
 	scale   float64
 	title   string
@@ -489,7 +490,7 @@ func (bw *browseWindow) onClick(id int) {
 	case bwBtnMax:
 		bw.toggleMax()
 	case bwBtnClose:
-		pPostMessageW.Call(bw.hwnd, WM_CLOSE, 0, 0)
+		pPostMessageW.Call(bw.hwnd, WM_APP_BROWSEHIDE, 0, 0)
 	case bwBtnGet:
 		pShellExecuteW.Call(0,
 			uintptr(unsafe.Pointer(u16("open"))),
@@ -551,6 +552,30 @@ func browseWndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 		return r
 	}
 	switch msg {
+	case WM_APP_BROWSESHOW:
+		bw.hidden = false
+		pShowWindow.Call(hwnd, SW_RESTORE)
+		if bw.w != nil {
+			bw.w.SetVisible(true)
+		}
+		pSetForegroundWindow.Call(hwnd)
+		return 0
+	case WM_APP_BROWSEHIDE:
+		if bw.failed {
+			pPostMessageW.Call(hwnd, WM_CLOSE, 0, 0)
+			return 0
+		}
+		bw.saveRect()
+		if bw.w != nil {
+			bw.w.Eval("document.querySelectorAll('video,audio').forEach(function(v){v.pause()})")
+			bw.w.SetVisible(false)
+		}
+		bw.hidden = true
+		pShowWindow.Call(hwnd, SW_HIDE)
+		if target, _, _ := pFindWindowW.Call(uintptr(unsafe.Pointer(u16("YTFrameHelper"))), 0); target != 0 {
+			sendCopyDataKind(target, 3, "hidden")
+		}
+		return 0
 	case WM_CREATE:
 		bw.hwnd = hwnd
 		return 0
@@ -768,7 +793,7 @@ func browsePlay(u string) {
 		sendCopyData(target, u)
 	}
 	if bw != nil && bw.hwnd != 0 {
-		pPostMessageW.Call(bw.hwnd, WM_CLOSE, 0, 0)
+		pPostMessageW.Call(bw.hwnd, WM_APP_BROWSEHIDE, 0, 0)
 	}
 }
 
@@ -796,11 +821,14 @@ const browseInitJS = `
   if (window.__ytframeInit) return;
   window.__ytframeInit = true;
 
+  var lastURL="", lastAt=0, lastTitle="";
   function send(u) {
+    if (u===lastURL && Date.now()-lastAt<1500) return;
+    lastURL=u;lastAt=Date.now();
     try { window.ytframePlay(u); } catch (e) {}
   }
   function title() {
-    try { window.ytframeTitle(document.title || 'YouTube'); } catch (e) {}
+    try { var t=document.title || 'YouTube';if(t===lastTitle)return;lastTitle=t;window.ytframeTitle(t); } catch (e) {}
   }
 
   document.addEventListener('click', function (e) {
@@ -842,8 +870,11 @@ const browseInitJS = `
 
 func (a *App) openBrowse() {
 	if target, _, _ := pFindWindowW.Call(uintptr(unsafe.Pointer(u16(browseClass))), 0); target != 0 {
-		pShowWindow.Call(target, SW_RESTORE)
-		pSetForegroundWindow.Call(target)
+		pPostMessageW.Call(target, WM_APP_BROWSESHOW, 0, 0)
+		a.browseOpen = true
+		return
+	}
+	if a.browseCmd != nil {
 		return
 	}
 	exe, err := os.Executable()
@@ -866,7 +897,6 @@ func (a *App) openBrowse() {
 	a.browseOpen = true
 	a.browseCmd = cmd
 	a.browsePid = cmd.Process.Pid
-	a.hideControlBar()
 	go func() {
 		cmd.Wait()
 		postMsg(WM_APP_BROWSEEXIT, 0, 0)
@@ -877,7 +907,7 @@ func (a *App) onBrowseExit() {
 	a.browseOpen = false
 	a.browseCmd = nil
 	a.browsePid = 0
-	if a.settings.BarVisible && a.player != nil && a.player.isRunning() {
+	if a.settings.BarVisible {
 		a.showControlBar()
 	}
 }

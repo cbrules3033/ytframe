@@ -11,7 +11,9 @@ mpv
 yt-dlp
   version:  2026.10.26
   source:   https://github.com/yt-dlp/yt-dlp/releases/tag/2026.10.26
-  binary:   https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp.exe
+  binary:   https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp_win.zip
+  note:     official unpacked build; Python is installed once in resolver/
+  sha256:   fd51b212cf8380c7a52ee08c0d6be7f3c59b2f2c832eaf7b45acfae6eab57419
 
 YTFrame
   source:   https://github.com/cbrules3033/ytframe

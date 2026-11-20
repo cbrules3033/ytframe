@@ -36,6 +36,8 @@ func setWindowContext(wnd uintptr, data interface{}) {
 }
 
 type browser interface {
+	Show() error
+	Hide() error
 	Embed(hwnd uintptr) bool
 	Resize()
 	Navigate(url string)
@@ -490,4 +492,12 @@ func (w *webview) Bind(name string, f interface{}) error {
 	})()`)
 
 	return nil
+}
+
+func (w *webview) SetVisible(visible bool) {
+	if visible {
+		_ = w.browser.Show()
+	} else {
+		_ = w.browser.Hide()
+	}
 }
