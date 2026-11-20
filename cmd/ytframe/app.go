@@ -1229,9 +1229,11 @@ func (a *App) openLog() {
 
 func (a *App) showAbout() {
 	msg := "YTFrame " + appVersion + "\n\n" +
-		"A borderless, video-only window for YouTube links.\n\n" +
-		"Hover near the bottom of the video for controls.\n" +
-		"The tray menu has quality, resume, SponsorBlock and more.\n\n" +
+		"A borderless, video-only window with a floating control bar.\n\n" +
+		"The bar has transport, seek, volume, three video modes and layouts.\n" +
+		"Ctrl+Alt+B shows or hides it. Pin it to keep it above other apps.\n\n" +
+		"Tray → Browse YouTube opens the built-in browser.\n" +
+		"The tray menu also has quality, layouts, resume and SponsorBlock.\n\n" +
 		"Drag edges/corners to resize (aspect stays locked).\n" +
 		"Double-click for fullscreen.\n\n" +
 		"mpv and yt-dlp are bundled. If a video suddenly stops working,\n" +
@@ -1531,10 +1533,14 @@ func (a *App) sponsorTick() {
 
 func (a *App) showControlsHelp() {
 	msg := "YTFrame controls\n\n" +
-		"Hover the bottom of the video for the control bar.\n\n" +
+		"The floating bar has play/pause, seek, volume, video modes\n" +
+		"and layouts. Drag it by the grip.\n\n" +
+		"Ctrl+Alt+B               show or hide the control bar\n" +
 		"Space / Ctrl+Alt+Space   play or pause\n" +
 		"Left / Right             seek 5 seconds\n" +
 		"Ctrl+Alt+J / Ctrl+Alt+L  seek 10 seconds from anywhere\n" +
+		"Ctrl+Alt+1...5           apply a layout\n" +
+		"Ctrl+Alt+Shift+1...5     save the current layout\n" +
 		"Up / Down / wheel        volume\n" +
 		"M / Ctrl+Alt+M           mute\n" +
 		"F or double-click        fullscreen\n" +
@@ -1546,7 +1552,8 @@ func (a *App) showControlsHelp() {
 		"Ctrl+Alt+V               open the paste bar\n" +
 		"Right-click the video    player menu\n" +
 		"Right-click the tray     app menu\n\n" +
-		"The tray menu also has quality, resume and SponsorBlock toggles."
+		"Tray → Browse YouTube opens the browser. The tray also has\n" +
+		"quality, layouts, resume and SponsorBlock."
 	messageBox(0, msg, "YTFrame controls", MB_OK|MB_ICONINFORMATION)
 }
 
