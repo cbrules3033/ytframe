@@ -326,3 +326,21 @@ func TestBrowserHideAndShowReuseItsWindow(t *testing.T) {
 		t.Fatal("reopening rebuilt or lost the browser host")
 	}
 }
+
+func TestFinishedVideoRemainsRecentWithoutResuming(t *testing.T) {
+	previous := dataDirPath
+	dataDirPath = t.TempDir()
+	defer func() { dataDirPath = previous }()
+	url := "https://youtu.be/abcdefghijk"
+	p := &Player{url: url, title: "Finished video", duration: 120, pos: 120, eof: true}
+	h := &History{Entries: map[string]HistoryEntry{}}
+	a := &App{player: p, history: h}
+	a.clearCurrentPos()
+	recent := recentEntries(h, 2)
+	if len(recent) != 1 || recent[0].Title != "Finished video" || recent[0].Pos != 0 {
+		t.Fatalf("finished video disappeared: %v", recent)
+	}
+	if resumeStart(url, h) != 0 {
+		t.Fatal("finished video incorrectly resumes")
+	}
+}

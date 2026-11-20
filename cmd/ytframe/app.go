@@ -1410,7 +1410,9 @@ func (a *App) clearCurrentPos() {
 	if url == "" || hasPlaylistParam(url) {
 		return
 	}
-	a.history.remove(videoKey(url))
+	st := p.snapshot()
+	// Keep finished videos in Recents, while clearing only the resume offset.
+	a.history.set(videoKey(url), HistoryEntry{URL: url, Title: st.Title, Pos: 0, Dur: st.Duration, Updated: nowUnix()})
 	a.history.save()
 	a.historyDirty = false
 }

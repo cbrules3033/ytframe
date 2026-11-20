@@ -295,9 +295,10 @@ func (p *Player) readLoop(f io.Reader) {
 			p.loadNotified = true
 			p.eof = false
 			p.eofPosted = false
+			started := p.loadStarted
 			p.mu.Unlock()
 			if !already {
-				logf("timing player=%d stage=file-loaded elapsed_ms=%d", p.id, time.Since(p.loadStarted).Milliseconds())
+				logf("timing player=%d stage=file-loaded elapsed_ms=%d", p.id, time.Since(started).Milliseconds())
 				p.discoverWindow()
 				postMsg(WM_APP_LOADED, uintptr(p.id), 0)
 			}
