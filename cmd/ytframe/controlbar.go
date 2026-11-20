@@ -1381,6 +1381,9 @@ func (a *App) cbShowMenu() {
 	}
 	add(flags, 115, "In-video controls")
 	add(MF_STRING, 140, "Browse YouTube…")
+	if a.browseCmd != nil {
+		add(MF_STRING, 142, "Close YouTube browser")
+	}
 	add(MF_STRING, 112, "Hide control bar")
 
 	var pt POINT

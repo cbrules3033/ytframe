@@ -236,7 +236,7 @@ func main() {
 		app.startPlayback(u, false)
 	} else {
 		app.showBarWith("", "", false)
-		pSetTimer.Call(helperHwnd, TIMER_PREWARM, 200, 0)
+		pSetTimer.Call(helperHwnd, TIMER_PREWARM, 1, 0)
 	}
 	if app.settings.BarVisible {
 		app.showControlBar()
@@ -478,7 +478,7 @@ func (a *App) showTrayMenu() {
 	}
 	defer pDestroyMenu.Call(menu)
 
-	hasPlayer := a.player != nil && a.player.isRunning()
+	hasPlayer := a.player != nil && a.player.isRunning() && a.player.urlNow() != ""
 	st := PlayerState{}
 	if hasPlayer {
 		st = a.player.snapshot()
@@ -665,6 +665,10 @@ func (a *App) onMenuCommand(id int) {
 		a.openBrowse()
 	case id == 141:
 		a.clearBrowseData()
+	case id == 142:
+		if hwnd, _, _ := pFindWindowW.Call(uintptr(unsafe.Pointer(u16(browseClass))), 0); hwnd != 0 {
+			pPostMessageW.Call(hwnd, WM_CLOSE, 0, 0)
+		}
 	case id >= 200 && id <= 203:
 		q := "best"
 		switch id {

@@ -12,6 +12,7 @@ import (
 	"github.com/Microsoft/go-winio"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -242,4 +243,86 @@ func TestIPCWriteWhileObserverIsWaiting(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatal("a blocked observer prevented the control command from reaching mpv")
+}
+
+func TestControlsCanBeRestoredBeforePlayingAVideo(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	previousApp, previousDir := app, dataDirPath
+	defer func() { app = previousApp; dataDirPath = previousDir }()
+	dataDirPath = t.TempDir()
+	a := &App{scale: 1, settings: defaultSettings()}
+	app = a
+	a.showControlBar()
+	if a.cbHwnd == 0 || !a.cbVisible || !a.cbIdle {
+		t.Fatal("controls did not appear before playback")
+	}
+	defer func() { pDestroyWindow.Call(a.cbHwnd); a.cbFreeGDI() }()
+	a.setControlBarVisible(false)
+	a.toggleControlBar()
+	visible, _, _ := pIsWindowVisible.Call(a.cbHwnd)
+	if !a.cbVisible || visible == 0 {
+		t.Fatal("idle controls could not be restored")
+	}
+}
+
+func TestCancelLoadingKeepsRemoteAndWarmPlayerReady(t *testing.T) {
+	p := &Player{id: 1, running: true, cmdCh: make(chan []byte, 16), url: "https://youtu.be/abcdefghijk"}
+	a := &App{settings: defaultSettings(), player: p, loading: true, loadingURL: p.url}
+	a.cancelLoading()
+	if a.loading || p.urlNow() != "" || !p.isRunning() {
+		t.Fatal("cancel did not return to a reusable idle player")
+	}
+	a.handleLoaded(1)
+	if !a.loadedAt.IsZero() || a.loading {
+		t.Fatal("a late loaded event revived a canceled request")
+	}
+	a.cbReadState()
+	if !a.cbIdle || !a.cbEnabled(cbBtnOpen) {
+		t.Fatal("remote is not ready after cancellation")
+	}
+}
+
+func TestWarmPlayerLoadsTheSelectedQuality(t *testing.T) {
+	a := &App{settings: defaultSettings()}
+	a.settings.Quality = "720"
+	p := &Player{app: a, cmdCh: make(chan []byte, 8)}
+	p.load("https://youtu.be/abcdefghijk", 0)
+	var message struct {
+		Command []json.RawMessage `json:"command"`
+	}
+	json.Unmarshal(<-p.cmdCh, &message)
+	var options map[string]string
+	if err := json.Unmarshal(message.Command[4], &options); err != nil {
+		t.Fatal(err)
+	}
+	if options["ytdl-format"] != qualityFormat("720") {
+		t.Fatalf("warm engine ignored selected quality: %v", options)
+	}
+}
+
+func TestBrowserHideAndShowReuseItsWindow(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	previous := bw
+	defer func() { bw = previous }()
+	bw = &browseWindow{scale: 1, hover: -1, press: -1}
+	bw.ensureGDI()
+	bw.createHost()
+	if bw.hwnd == 0 {
+		t.Fatal("browser host was not created")
+	}
+	hwnd := bw.hwnd
+	defer pDestroyWindow.Call(hwnd)
+	pShowWindow.Call(hwnd, SW_SHOW)
+	browseWndProc(hwnd, WM_APP_BROWSEHIDE, 0, 0)
+	visible, _, _ := pIsWindowVisible.Call(hwnd)
+	if visible != 0 || !bw.hidden {
+		t.Fatal("browser did not hide")
+	}
+	browseWndProc(hwnd, WM_APP_BROWSESHOW, 0, 0)
+	visible, _, _ = pIsWindowVisible.Call(hwnd)
+	if visible == 0 || bw.hidden || bw.hwnd != hwnd {
+		t.Fatal("reopening rebuilt or lost the browser host")
+	}
 }

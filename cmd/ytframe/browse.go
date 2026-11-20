@@ -165,6 +165,7 @@ func runBrowse() {
 		}
 	}
 	if bw.w != nil {
+		pShowWindow.Call(bw.container, SW_SHOW)
 		bw.w.Bind("ytframePlay", func(u string) {
 			bw.w.Dispatch(func() { browsePlay(u) })
 		})
@@ -267,7 +268,7 @@ func (bw *browseWindow) createContainer() {
 		0,
 		uintptr(unsafe.Pointer(u16("STATIC"))),
 		0,
-		WS_CHILD|WS_VISIBLE|WS_CLIPCHILDREN,
+		WS_CHILD|WS_CLIPCHILDREN,
 		0, uintptr(th), uintptr(rc.Right), uintptr(rc.Bottom-th),
 		bw.hwnd, 0, getModuleHandle(), 0,
 	)
@@ -348,6 +349,17 @@ func (bw *browseWindow) paint(hdc uintptr) {
 	pSetBkMode.Call(hdc, TRANSPARENT)
 	titleRect := RECT{Left: int32(144 * s), Top: 0, Right: bw.btn[bwBtnMin].Left - int32(10*s), Bottom: th}
 	drawText(hdc, bw.title, titleRect, DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX)
+
+	if !bw.failed && bw.w == nil {
+		fillRect(hdc, RECT{Left: 0, Top: th, Right: w, Bottom: h}, bw.brBg)
+		c := bw.errorContent()
+		pSelectObject.Call(hdc, bw.fontTitle)
+		pSetTextColor.Call(hdc, colText)
+		drawText(hdc, "Opening YouTube…", RECT{Left: c.Left, Top: c.Top, Right: c.Right, Bottom: c.Top + int32(40*s)}, DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX)
+		pSelectObject.Call(hdc, bw.fontBody)
+		pSetTextColor.Call(hdc, colMuted)
+		drawText(hdc, "Your browsing session will be ready in a moment.", RECT{Left: c.Left, Top: c.Top + int32(52*s), Right: c.Right, Bottom: c.Top + int32(80*s)}, DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX)
+	}
 
 	if bw.failed {
 		content := RECT{Left: 0, Top: th, Right: w, Bottom: h}

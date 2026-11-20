@@ -31,9 +31,12 @@ default (pin toggles it). It never steals keyboard focus.
   grid               layouts
   pin                control bar always on top
   Browse             open YouTube
-  X                  hide the bar
+  + Open             paste a new link
+  -                  hide the bar
+  stop square        cancel the current load
 
-Show/hide the bar: Ctrl+Alt+B or tray -> Control bar.
+The bar is available before playback and remains visible during loading.
+Restore it from the launcher's Show controls button, Ctrl+Alt+B or the tray.
 The bars overflow menu has everything, including video always-on-top and the
 optional in-video mpv controls.
 
@@ -63,7 +66,9 @@ YOUTUBE BROWSER
 ---------------
 Tray -> Browse YouTube, or the bars Browse button. A borderless window with
 a dark toolbar and the real YouTube site. Clicking a video sends it to the
-player and closes the browser.
+player and hides the browser. The loaded page is kept for fast reopening.
+The X also hides it; the remote menu's Close YouTube browser frees the session.
+Quitting YTFrame closes it completely.
 
 Needs the Microsoft Edge WebView2 Runtime, which normally comes with Edge on
 Windows 10/11. If it is missing, the browser window has a Get WebView2 button;
@@ -111,8 +116,9 @@ YouTube serves (usually 10-20 seconds behind the live edge).
 
 IF A VIDEO STOPS WORKING
 ------------------------
-Right-click the tray icon and choose "Update yt-dlp". It updates the bundled
-yt-dlp.exe in place (no admin needed).
+Right-click the tray icon and choose "Update yt-dlp". It downloads the official
+unpacked resolver, verifies its release SHA-256 checksum and installs it
+side by side. The next video uses the new version. No admin rights needed.
 
 FILES
 -----
@@ -150,3 +156,12 @@ CODE SIGNING POLICY
 -------------------
 This build is unsigned. See CODE_SIGNING.txt for the release policy and
 free open-source signing setup. Signing provider approval is still required.
+
+STARTUP AND PERFORMANCE
+-----------------------
+The player warms while the launcher is visible. The bundled resolver lives
+in resolver/ so Python is unpacked once, rather than on every video load.
+Recent videos can be resumed from the launcher. Loading can be canceled.
+Idle and paused controls redraw only when their displayed state changes.
+Windows builds include RESOLVER_BENCHMARK.json and PLAYBACK_BENCHMARK.json.
+These measure resolver startup and local playback; network times vary.
