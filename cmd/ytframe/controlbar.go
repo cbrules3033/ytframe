@@ -573,7 +573,6 @@ func (a *App) cbAction(b int) {
 		a.openBrowse()
 	case cbBtnHide:
 		a.setControlBarVisible(false)
-		a.showBarWith("", "Controls hidden. Use Show controls to bring them back.", false)
 	case cbBtnMenu:
 		a.cbShowMenu()
 	}
@@ -859,25 +858,25 @@ func (a *App) cbIconPlay(dc uintptr, r RECT, paused bool) {
 
 func (a *App) cbIconStep(dc uintptr, r RECT, dir int) {
 	s := a.cbScale
-	cx := (r.Left + r.Right) / 2
-	cy := (r.Top + r.Bottom) / 2
-	sz := int32(5 * s)
+	cx, cy := (r.Left+r.Right)/2, (r.Top+r.Bottom)/2
+	d := int32(11 * s)
+	pSelectObject.Call(dc, a.cbPenIcon)
+	pSelectObject.Call(dc, pGetStockObject2(NULL_BRUSH))
 	if dir < 0 {
-		pts := []POINT{{cx + sz, cy - sz - 3}, {cx + sz, cy + sz - 3}, {cx - sz, cy - 3}}
-		pSelectObject.Call(dc, pGetStockObject2(NULL_PEN))
-		pSelectObject.Call(dc, a.cbBrIcon)
-		pPolygon.Call(dc, uintptr(unsafe.Pointer(&pts[0])), 3)
+		pArc.Call(dc, uintptr(cx-d), uintptr(cy-d), uintptr(cx+d), uintptr(cy+d), uintptr(cx-int32(5*s)), uintptr(cy-d), uintptr(cx-int32(9*s)), uintptr(cy-int32(3*s)))
 	} else {
-		pts := []POINT{{cx - sz, cy - sz - 3}, {cx - sz, cy + sz - 3}, {cx + sz, cy - 3}}
-		pSelectObject.Call(dc, pGetStockObject2(NULL_PEN))
-		pSelectObject.Call(dc, a.cbBrIcon)
-		pPolygon.Call(dc, uintptr(unsafe.Pointer(&pts[0])), 3)
+		pArc.Call(dc, uintptr(cx-d), uintptr(cy-d), uintptr(cx+d), uintptr(cy+d), uintptr(cx+int32(9*s)), uintptr(cy-int32(3*s)), uintptr(cx+int32(5*s)), uintptr(cy-d))
 	}
+	x := cx + int32(dir)*int32(8*s)
+	y := cy - int32(9*s)
+	pts := []POINT{{x, y - int32(4*s)}, {x - int32(dir)*int32(6*s), y}, {x, y + int32(4*s)}}
+	pSelectObject.Call(dc, pGetStockObject2(NULL_PEN))
+	pSelectObject.Call(dc, a.cbBrIcon)
+	pPolygon.Call(dc, uintptr(unsafe.Pointer(&pts[0])), 3)
 	pSelectObject.Call(dc, a.cbFontSmall)
 	pSetTextColor.Call(dc, colText)
 	pSetBkMode.Call(dc, TRANSPARENT)
-	drawText(dc, "10", RECT{Left: r.Left, Top: cy + int32(2*s), Right: r.Right, Bottom: r.Bottom},
-		DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX)
+	drawText(dc, "10", RECT{Left: cx - d, Top: cy - int32(7*s), Right: cx + d, Bottom: cy + int32(9*s)}, DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX)
 }
 
 func (a *App) cbIconVolume(dc uintptr, r RECT, muted bool) {
@@ -1354,6 +1353,21 @@ func (a *App) cbShowMenu() {
 	}
 	add(flags, 104, "Video always on top")
 
+	quality, _, _ := pCreatePopupMenu.Call()
+	if quality != 0 {
+		for i, q := range []string{"best", "1080", "720", "480"} {
+			label := q + "p"
+			if q == "best" {
+				label = "Best available"
+			}
+			flags := uintptr(MF_STRING)
+			if a.settings.Quality == q {
+				flags |= MF_CHECKED
+			}
+			pAppendMenuW.Call(quality, flags, uintptr(200+i), uintptr(unsafe.Pointer(u16(label))))
+		}
+		pAppendMenuW.Call(menu, MF_POPUP|MF_STRING, quality, uintptr(unsafe.Pointer(u16("Quality"))))
+	}
 	lmenu, _, _ := pCreatePopupMenu.Call()
 	if lmenu != 0 {
 		a.buildLayoutsMenu(lmenu)

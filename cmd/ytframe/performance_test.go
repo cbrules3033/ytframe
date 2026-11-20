@@ -126,10 +126,10 @@ func TestPlaybackStartupBenchmark(t *testing.T) {
 		}
 		t.Fatalf("player did not become ready (ready=%v)", ready)
 	}
+	a := &App{settings: defaultSettings()}
+	a.settings.ExtraArgs = "--vo=null --ao=null"
 	for _, warm := range []bool{false, true} {
 		for i := 0; i < 4; i++ {
-			a := &App{settings: defaultSettings()}
-			a.settings.ExtraArgs = "--vo=null --ao=null"
 			p := newPlayer(a)
 			started := time.Now()
 			url := file

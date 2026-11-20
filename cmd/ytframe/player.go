@@ -469,9 +469,18 @@ func (p *Player) load(url string, startSec int) {
 
 	// Always override --start, including zero, so the previous video's
 	// command-line resume offset cannot leak into the next load.
-	p.command("loadfile", url, "replace", -1, map[string]string{"start": fmt.Sprint(startSec)})
+	options := map[string]string{"start": fmt.Sprint(startSec)}
+	if p.app != nil {
+		q := qualityFormat(p.app.settings.Quality)
+		if q == "" {
+			q = "bestvideo+bestaudio/best"
+		}
+		options["ytdl-format"] = q
+	}
+	p.command("loadfile", url, "replace", -1, options)
 	p.command("set_property", "force-window", "immediate")
-	p.command("set_property", "pause", false)
+	pause := p.app != nil && p.app.pendingPause
+	p.command("set_property", "pause", pause)
 	p.discoverWindow()
 	logf("loading %s", url)
 }

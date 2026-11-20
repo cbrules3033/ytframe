@@ -32,7 +32,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Could not build playback benchmark' }
 try {
     $env:YTFRAME_BENCHMARK = '1'
     $env:YTFRAME_BENCHMARK_OUTPUT = (Join-Path (Get-Location) "$PackagePath/PLAYBACK_BENCHMARK.json")
-    & "$PackagePath/YTFrame-performance.exe" -test.run '^TestPlaybackStartupBenchmark$' -test.v -test.timeout 2m
+    & "$PackagePath/YTFrame-performance.exe" '-test.run=^TestPlaybackStartupBenchmark$' '-test.v' '-test.timeout=2m'
     if ($LASTEXITCODE -ne 0) { throw 'Playback benchmark failed' }
 } finally {
     Remove-Item "$PackagePath/YTFrame-performance.exe" -ErrorAction SilentlyContinue

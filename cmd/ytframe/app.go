@@ -1521,17 +1521,10 @@ func (a *App) switchQuality(q string) {
 	a.loadingURL = url
 	a.loadingStart = pos
 	a.retries = 0
-	old := a.player
-	a.player = nil
-	old.killAsync()
-	if err := a.startPlayer(url, pos); err != nil {
-		a.loading = false
-		a.pendingPause = false
-		a.pendingFullscreen = false
-		logf("quality restart failed: %v", err)
-		a.showBarWith(url, "Could not restart mpv: "+err.Error(), true)
-		return
-	}
+	a.loadRequested = time.Now()
+	a.player.load(url, pos)
+	a.setStatus("Changing quality…", false)
+	a.cbInvalidate()
 	pSetTimer.Call(helperHwnd, TIMER_LOADWAIT, 30000, 0)
 	logf("quality -> %s at %ds", q, pos)
 }
