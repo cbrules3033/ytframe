@@ -4,9 +4,12 @@ package main
 
 import (
 	"archive/zip"
+	"bufio"
+
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"github.com/Microsoft/go-winio"
 	"os"
 	"path/filepath"
 	"testing"
@@ -139,6 +142,7 @@ func TestPlaybackStartupBenchmark(t *testing.T) {
 			if err := p.start(url, 0); err != nil {
 				t.Fatal(err)
 			}
+			t.Cleanup(func() { p.quitAndWait(2 * time.Second) })
 			if warm {
 				wait(p, true)
 				started = time.Now()
@@ -161,4 +165,81 @@ func TestPlaybackStartupBenchmark(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+}
+
+func TestIPCWriteWhileObserverIsWaiting(t *testing.T) {
+	p := &Player{id: 9876, running: true, done: make(chan struct{}), processStarted: time.Now()}
+	listener, err := winio.ListenPipe(p.pipeName(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	observed := make(chan struct{})
+	serverErr := make(chan error, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			serverErr <- err
+			return
+		}
+		defer conn.Close()
+		scanner := bufio.NewScanner(conn)
+		for scanner.Scan() {
+			var request struct {
+				Command []json.RawMessage `json:"command"`
+			}
+			if err := json.Unmarshal(scanner.Bytes(), &request); err != nil {
+				serverErr <- err
+				return
+			}
+			if len(request.Command) < 2 {
+				continue
+			}
+			var operation, property string
+			json.Unmarshal(request.Command[0], &operation)
+			json.Unmarshal(request.Command[1], &property)
+			if operation == "observe_property" && len(request.Command) > 2 {
+				json.Unmarshal(request.Command[2], &property)
+				if property == "cache-buffering-state" {
+					close(observed)
+				}
+			}
+			if operation == "set_property" && property == "volume" {
+				_, err = conn.Write([]byte("{\"event\":\"property-change\",\"name\":\"volume\",\"data\":42}\n"))
+				serverErr <- err
+				return
+			}
+		}
+		serverErr <- scanner.Err()
+	}()
+	go p.connectLoop()
+	defer func() {
+		close(p.done)
+		p.mu.Lock()
+		conn := p.conn
+		p.mu.Unlock()
+		if conn != nil {
+			conn.Close()
+		}
+	}()
+	select {
+	case <-observed:
+	case err := <-serverErr:
+		t.Fatalf("pipe server exited: %v", err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("observer setup timed out")
+	}
+	// Let the observer enter its next read, with no property events queued.
+	time.Sleep(25 * time.Millisecond)
+	if !p.command("set_property", "volume", 42) {
+		t.Fatal("could not queue command")
+	}
+	until := time.Now().Add(2 * time.Second)
+	for time.Now().Before(until) {
+		if p.snapshot().Volume == 42 {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("a blocked observer prevented the control command from reaching mpv")
 }

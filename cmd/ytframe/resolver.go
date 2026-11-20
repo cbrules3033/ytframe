@@ -18,7 +18,15 @@ import (
 
 // The unpacked upstream build avoids extracting Python into TEMP for every video.
 func resolverPath() string {
-	for _, p := range []string{filepath.Join(dataDirPath, "resolver", "yt-dlp.exe"), bundledPath("resolver/yt-dlp.exe"), bundledPath("yt-dlp.exe")} {
+	candidates := []string{}
+	if data, err := os.ReadFile(filepath.Join(dataDirPath, "resolver-version.txt")); err == nil {
+		version := strings.TrimSpace(string(data))
+		if validResolverVersion(version) {
+			candidates = append(candidates, filepath.Join(dataDirPath, "resolver-updates", version, "yt-dlp.exe"))
+		}
+	}
+	candidates = append(candidates, filepath.Join(dataDirPath, "resolver", "yt-dlp.exe"), bundledPath("resolver/yt-dlp.exe"), bundledPath("yt-dlp.exe"))
+	for _, p := range candidates {
 		if st, err := os.Stat(p); err == nil && !st.IsDir() {
 			return p
 		}
@@ -135,7 +143,7 @@ func updateResolver() error {
 		return fmt.Errorf("release lookup returned HTTP %d", resp.StatusCode)
 	}
 	release := strings.TrimPrefix(resp.Request.URL.Path, "/yt-dlp/yt-dlp/releases/tag/")
-	if release == "" || strings.ContainsAny(release, "/\\") {
+	if !validResolverVersion(release) {
 		return fmt.Errorf("invalid resolver release")
 	}
 	base := "https://github.com/yt-dlp/yt-dlp/releases/download/" + release + "/"
@@ -178,19 +186,37 @@ func updateResolver() error {
 	if err := unpackResolver(archive, fresh); err != nil {
 		return err
 	}
-	target, backup := filepath.Join(dataDirPath, "resolver"), filepath.Join(stage, "previous")
-	hadPrevious := false
-	if _, err := os.Stat(target); err == nil {
-		if err := os.Rename(target, backup); err != nil {
+	// Install side by side: an active resolver's DLLs are never renamed or deleted.
+	versions := filepath.Join(dataDirPath, "resolver-updates")
+	if err := os.MkdirAll(versions, 0o755); err != nil {
+		return err
+	}
+	target := filepath.Join(versions, release)
+	if _, err := os.Stat(filepath.Join(target, "yt-dlp.exe")); os.IsNotExist(err) {
+		if err := os.Rename(fresh, target); err != nil {
 			return err
 		}
-		hadPrevious = true
 	}
-	if err := os.Rename(fresh, target); err != nil {
-		if hadPrevious {
-			os.Rename(backup, target)
-		}
+	manifest := filepath.Join(dataDirPath, "resolver-version.txt")
+	tmp := manifest + ".tmp"
+	if err := os.WriteFile(tmp, []byte(release+"\n"), 0o600); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, manifest); err != nil {
 		return err
 	}
 	return nil
+}
+
+func validResolverVersion(version string) bool {
+	if len(version) < 1 || len(version) > 80 || version[0] < '0' || version[0] > '9' {
+		return false
+	}
+	for _, r := range version {
+		if (r >= '0' && r <= '9') || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || r == '.' || r == '-' || r == '_' {
+			continue
+		}
+		return false
+	}
+	return true
 }

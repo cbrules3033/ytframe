@@ -27,3 +27,8 @@ WebView2Loader
   source:  Microsoft WebView2 SDK / go-winloader
   note:    embedded in YTFrame.exe; runtime is installed by Windows/Edge
 go-webview2 commit: 56598839c808a2340edee99204db479f410e9bf4
+
+go-winio
+  version: v0.6.1
+  licence: MIT
+  source:  https://github.com/microsoft/go-winio/tree/v0.6.1

@@ -4,8 +4,12 @@ package main
 
 import (
 	"bufio"
+	"context"
+	"io"
+
 	"encoding/json"
 	"fmt"
+	"github.com/Microsoft/go-winio"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,7 +28,7 @@ type Player struct {
 	mu            sync.Mutex
 	cmd           *exec.Cmd
 	hwnd          uintptr
-	conn          *os.File
+	conn          io.ReadWriteCloser
 	cmdCh         chan []byte
 	running       bool
 	done          chan struct{}
@@ -200,42 +204,45 @@ func (p *Player) start(url string, startSec int) error {
 }
 
 func (p *Player) connectLoop() {
-	pipe := p.pipeName()
-	access := uint32(syscall.GENERIC_READ | syscall.GENERIC_WRITE)
-	deadline := time.Now().Add(12 * time.Second)
-	for time.Now().Before(deadline) {
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	go func() {
 		select {
 		case <-p.done:
-			return
-		default:
+			cancel()
+		case <-ctx.Done():
 		}
-		h, err := syscall.CreateFile(u16(pipe), access, FILE_SHARE_READ|FILE_SHARE_WRITE, nil, syscall.OPEN_EXISTING, 0, 0)
+	}()
+	// IOCP-backed overlapped handles allow writes while the observer is blocked
+	// reading an idle pipe. A synchronous os.File deadlocks here on Windows.
+	var conn io.ReadWriteCloser
+	var err error
+	for {
+		conn, err = winio.DialPipeContext(ctx, p.pipeName())
 		if err == nil {
-			f := os.NewFile(uintptr(h), "mpv-ipc")
-			ch := make(chan []byte, 64)
-			p.mu.Lock()
-			if !p.running {
-				p.mu.Unlock()
-				f.Close()
-				return
-			}
-			p.conn = f
-			p.cmdCh = ch
-			p.mu.Unlock()
-			logf("timing player=%d stage=ipc elapsed_ms=%d", p.id, time.Since(p.processStarted).Milliseconds())
-			go p.writeLoop(f, ch)
-			p.observeAll()
-			go p.readLoop(f)
-			postMsg(WM_APP_MPVREADY, uintptr(p.id), 0)
-			return
+			break
 		}
 		select {
-		case <-p.done:
+		case <-ctx.Done():
+			logf("mpv IPC connection failed: %v", err)
 			return
 		case <-time.After(15 * time.Millisecond):
 		}
 	}
-	logf("mpv ipc connection timed out")
+	ch := make(chan []byte, 64)
+	p.mu.Lock()
+	if !p.running {
+		p.mu.Unlock()
+		conn.Close()
+		return
+	}
+	p.conn, p.cmdCh = conn, ch
+	p.mu.Unlock()
+	logf("timing player=%d stage=ipc elapsed_ms=%d", p.id, time.Since(p.processStarted).Milliseconds())
+	go p.writeLoop(conn, ch)
+	p.observeAll()
+	go p.readLoop(conn)
+	postMsg(WM_APP_MPVREADY, uintptr(p.id), 0)
 }
 
 func (p *Player) observeAll() {
@@ -250,7 +257,7 @@ func (p *Player) observeAll() {
 	}
 }
 
-func (p *Player) readLoop(f *os.File) {
+func (p *Player) readLoop(f io.Reader) {
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	for sc.Scan() {
@@ -408,7 +415,7 @@ func (p *Player) applyProperty(name string, raw json.RawMessage) {
 
 // writeLoop owns the pipe. Commands are queued, so a stalled mpv can never
 // freeze the UI thread; a wedged player is restarted by the load watchdog.
-func (p *Player) writeLoop(f *os.File, ch chan []byte) {
+func (p *Player) writeLoop(f io.Writer, ch chan []byte) {
 	w := bufio.NewWriter(f)
 	for {
 		var b []byte
