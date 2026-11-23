@@ -319,9 +319,16 @@ func TestBrowserHideAndShowReuseItsWindow(t *testing.T) {
 	if bw.hwnd == 0 {
 		t.Fatal("browser host was not created")
 	}
+	bw.createContainer()
+	if bw.container == 0 {
+		t.Fatal("browser container was not created")
+	}
 	hwnd := bw.hwnd
 	defer pDestroyWindow.Call(hwnd)
 	pShowWindow.Call(hwnd, SW_SHOW)
+	if visible, _, _ := pIsWindowVisible.Call(bw.container); visible == 0 {
+		t.Fatal("the WebView2 container is hidden before the controller is created")
+	}
 	browseWndProc(hwnd, WM_APP_BROWSEHIDE, 0, 0)
 	visible, _, _ := pIsWindowVisible.Call(hwnd)
 	if visible != 0 || !bw.hidden {

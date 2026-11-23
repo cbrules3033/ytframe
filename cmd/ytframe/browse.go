@@ -21,6 +21,13 @@ const (
 	browseClass    = "YTFrameBrowseHost"
 	browseToolbarH = 52
 	browseHome     = "https://www.youtube.com/"
+
+	browseRefreshTimer = 1
+
+	// WebView2 can leave a white surface after its host was hidden or if it
+	// was created just before the first paint. A delayed visibility/resize
+	// nudge forces Chromium to present the page again.
+	browseRefreshDelay = 120
 )
 
 const (
@@ -130,6 +137,12 @@ func runBrowse() {
 	}
 	pShowWindow.Call(bw.hwnd, SW_SHOW)
 	pUpdateWindow.Call(bw.hwnd)
+	if bw.container != 0 {
+		// WebView2 created while its parent is hidden can present a blank
+		// white surface until something forces a repaint. Make the container
+		// visible before creating the controller.
+		pShowWindow.Call(bw.container, SW_SHOW)
+	}
 	logf("browse: host shown")
 
 	version := ""
@@ -166,6 +179,8 @@ func runBrowse() {
 	}
 	if bw.w != nil {
 		pShowWindow.Call(bw.container, SW_SHOW)
+		bw.w.SetVisible(true)
+		bw.w.Resize()
 		bw.w.Bind("ytframePlay", func(u string) {
 			bw.w.Dispatch(func() { browsePlay(u) })
 		})
@@ -174,10 +189,35 @@ func runBrowse() {
 		})
 		bw.w.Init(browseInitJS)
 		bw.w.Navigate(browseHome)
+		pSetTimer.Call(bw.hwnd, browseRefreshTimer, 700, 0)
 		bw.w.Run()
 	} else {
 		bw.runLoop()
 	}
+}
+
+func (bw *browseWindow) showWebView() {
+	if bw.w == nil {
+		return
+	}
+	pShowWindow.Call(bw.container, SW_SHOW)
+	bw.layout()
+	bw.w.SetVisible(true)
+	bw.w.Resize()
+	pSetTimer.Call(bw.hwnd, browseRefreshTimer, uintptr(browseRefreshDelay), 0)
+}
+
+func (bw *browseWindow) refreshWebView() {
+	if bw.w == nil || bw.hwnd == 0 || bw.hidden {
+		return
+	}
+	// A plain SetVisible(true) is not enough for some WebView2 builds after
+	// the host window was hidden; force a visibility transition and resize.
+	bw.w.SetVisible(false)
+	bw.w.SetVisible(true)
+	bw.w.Resize()
+	bw.invalidate()
+	logf("browse: webview repaint")
 }
 
 // hideBrowse keeps the WebView2 process and page alive. Reopening Browse only
@@ -189,6 +229,7 @@ func (bw *browseWindow) hideBrowse() {
 	bw.saveRect()
 	if bw.w != nil {
 		bw.w.Eval("document.querySelectorAll('video,audio').forEach(function(v){v.pause()})")
+		bw.w.SetVisible(false)
 	}
 	bw.hidden = true
 	pShowWindow.Call(bw.hwnd, SW_HIDE)
@@ -297,7 +338,7 @@ func (bw *browseWindow) createContainer() {
 		0,
 		uintptr(unsafe.Pointer(u16("STATIC"))),
 		0,
-		WS_CHILD|WS_CLIPCHILDREN,
+		WS_CHILD|WS_VISIBLE|WS_CLIPCHILDREN,
 		0, uintptr(th), uintptr(rc.Right), uintptr(rc.Bottom-th),
 		bw.hwnd, 0, getModuleHandle(), 0,
 	)
@@ -596,7 +637,7 @@ func browseWndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 	case WM_APP_BROWSESHOW:
 		bw.hidden = false
 		pShowWindow.Call(hwnd, SW_RESTORE)
-		bw.layout()
+		bw.showWebView()
 		bw.invalidate()
 		pSetForegroundWindow.Call(hwnd)
 		logf("browse: session shown")
@@ -614,6 +655,17 @@ func browseWndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 	case WM_CREATE:
 		bw.hwnd = hwnd
 		return 0
+	case WM_SHOWWINDOW:
+		if wparam != 0 && bw.w != nil {
+			bw.showWebView()
+		}
+		return 0
+	case WM_TIMER:
+		if wparam == browseRefreshTimer {
+			pKillTimer.Call(hwnd, browseRefreshTimer)
+			bw.refreshWebView()
+			return 0
+		}
 	case WM_DPICHANGED:
 		bw.scale = float64(loword(wparam)) / 96
 		bw.freeGDI()
@@ -850,6 +902,7 @@ func browseSetTitle(t string) {
 		t = string(r[:120]) + "…"
 	}
 	bw.title = t
+	logf("browse title: %s", t)
 	if bw.hwnd != 0 {
 		setWindowText(bw.hwnd, t+" — YTFrame")
 		bw.invalidate()

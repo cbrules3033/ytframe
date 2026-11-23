@@ -1,4 +1,4 @@
-YTFrame 1.3.2
+YTFrame 1.3.3
 =============
 
 A borderless, video-only YouTube window with a floating control bar and a
@@ -77,6 +77,10 @@ Close YouTube browser frees the session. Quitting YTFrame closes it completely.
 Needs the Microsoft Edge WebView2 Runtime, which normally comes with Edge on
 Windows 10/11. If it is missing, the browser window has a Get WebView2 button;
 the player keeps working without it.
+
+The page is created in a visible container and explicitly re-shown and resized
+when the retained browser window is reopened, so it should not remain blank
+white.
 
 The profile is stored in browse-data\ next to the exe, so logins/cookies
 survive restarts. Tray -> Clear YouTube browsing data removes it.

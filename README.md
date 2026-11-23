@@ -12,6 +12,8 @@ Paste a link or browse YouTube, click a video, and it plays in a window that is 
 
 **1.3.2 fix:** switching videos keeps the same player window at the same position, including on multi-monitor desktops. The window is not recreated or moved to the monitor where the browser or mouse happens to be.
 
+**1.3.3 fix:** the YouTube page no longer stays blank white when Browse first opens or when a retained browser window is shown again. WebView2 is created in an already-visible container, hidden with the host, and re-shown with an explicit visibility/resize repaint.
+
 ![The paste bar](docs/bar.png)
 
 ![The floating control bar](docs/controlbar.png)
