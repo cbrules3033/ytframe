@@ -2,7 +2,7 @@
 
 **A borderless, video-only YouTube window for Windows — with a floating remote and a built-in browser.**
 
-Paste a link or browse YouTube, click a video, and it plays in a window that is nothing but picture. Drag any edge to resize; the video's aspect ratio stays perfect. The controls live in their own small, always-on-top bar, so they stay usable even when the video is tiny.
+Paste a link or browse YouTube, click a video, and it plays in a window that is nothing but picture. Drag any edge to resize; the video's aspect ratio stays perfect. The controls live in their own small, floating bar, so they stay usable even when the video is tiny.
 
 **[Download the latest release](https://github.com/cbrules3033/ytframe/releases/latest)** — extract the zip anywhere and run `YTFrame.exe`.
 
@@ -17,6 +17,8 @@ Paste a link or browse YouTube, click a video, and it plays in a window that is 
 **1.3.4:** the remote has been redesigned around a larger 640×168 card: a clearer title row, softer surfaces, a proper timeline with a live scrub handle, a large play/pause control, and consistent rounded-line icons for skip, volume, fullscreen, video mode, layouts and pin.
 
 **1.3.5:** the remote and its icons are rendered at 6× logical resolution and box-filtered down with a native-resolution text pass, so curves and diagonals are properly antialiased instead of pixelated.
+
+**1.4.0:** both windows now start as normal windows, with independent always-on-top toggles. The bar can be resized from its corner grip, with Ctrl+wheel, or from 80–140% presets, and both windows have 100–50% opacity presets for a quieter, stealthier setup.
 
 ![The paste bar](docs/bar.png)
 
@@ -33,7 +35,7 @@ YTFrame hands the video to [mpv](https://mpv.io) via [yt-dlp](https://github.com
 - **Video only.** No window border, no player chrome, no ads in the player.
 - **Recent videos.** Resume a recent video directly from the launcher.
 - **Faster startup.** The player warms while the launcher is visible, and the resolver no longer unpacks Python for every link. The browser preserves its session between opens.
-- **Floating control bar.** Available at startup, during loading and during playback. Its own small window: play/pause, ±10s, seek, time, volume, fullscreen, video mode, layouts, pin, Browse, hide. Free-floating, always on top by default, never steals focus.
+- **Floating control bar.** Available at startup, during loading and during playback. Its own small window: play/pause, ±10s, seek, time, volume, fullscreen, video mode, layouts, pin, Browse, hide. Free-floating and a normal window by default; the pin keeps it above other apps. It never steals focus.
 - **Three video modes.** Show always · Hide on pause · Always hidden (audio-only). The bar stays as the remote when the picture is hidden.
 - **Five layouts.** Save the video window and bar positions into slots, apply them with `Ctrl+Alt+1…5`, save with `Ctrl+Alt+Shift+1…5`, and mark one as the startup default.
 - **Browse YouTube.** A borderless custom window with the real YouTube site (home, search, channels, recommendations). Clicking a video sends it to the player. Uses the system Edge WebView2 runtime; profile and logins live in `browse-data/`.
@@ -80,14 +82,16 @@ Requirements: Windows 10 or 11, 64-bit. YouTube browsing needs the Microsoft Edg
 
 ## The control bar
 
-The remote is available before playback, so you can always reach **+ Open** and **Browse**. It shows loading and buffering states; during loading its primary button becomes **Cancel**. The **−** button hides it, and the launcher’s **Show controls** button restores it. The remote has a title row, a dedicated timeline and generously spaced playback controls. Hover an icon to see its action and shortcut. The bar is a separate window, so it can be larger than a tiny video and remains readable at any size. It is always on top by default (the pin toggles it) and uses `WS_EX_NOACTIVATE`, so clicking it never steals focus from the video, a fullscreen app, or your work.
+The remote is available before playback, so you can always reach **+ Open** and **Browse**. It shows loading and buffering states; during loading its primary button becomes **Cancel**. The **−** button hides it, and the launcher’s **Show controls** button restores it. The remote has a title row, a dedicated timeline and generously spaced playback controls. Hover an icon to see its action and shortcut. The bar is a separate window, so it can be larger than a tiny video and remains readable at any size. It starts as a normal window and uses `WS_EX_NOACTIVATE`, so clicking it never steals focus. The pin (or **Window behavior → Control bar always on top**) keeps it above other apps when you want that.
 
 - The seek line is clickable and draggable; the time updates live.
 - The volume slider is clickable/draggable; the wheel over the bar also adjusts volume.
 - The eye button cycles **Show always → Hide on pause → Always hidden (audio only)**.
 - The grid button opens the five layout slots.
 - The pin toggles the bar's always-on-top.
-- The overflow menu (⋯) has radio versions of the video modes, the two always-on-top toggles, layouts, quality, in-video controls, Browse and Hide. **Close YouTube browser** frees the retained browser session when one exists.
+- The overflow menu (⋯) has video modes, a **Window behavior** submenu (both always-on-top toggles, bar size and opacities), layouts, quality, in-video controls, Browse and Hide. **Close YouTube browser** frees the retained browser session when one exists.
+- Drag the small grip in the bottom-right corner to resize the bar, or hold **Ctrl** and use the mouse wheel. **Window behavior → Control bar size** has 80/100/120/140% presets.
+- **Window behavior → Control bar opacity / Video opacity** offers 100/90/80/70/60/50%. The video uses the D3D11 Blt swapchain for window alpha; if your driver ignores it, leave video opacity at 100%.
 
 The in-video mpv controls are off by default (they're unusable on tiny windows); tray → **In-video controls** brings them back.
 
@@ -100,6 +104,17 @@ Five slots, each storing the video window rect and the control-bar position.
 - `Ctrl+Alt+Shift+1…5` saves the current arrangement.
 - The **default** slot is applied at startup / when the first video window appears. Manual resizes during the session are remembered; the default only overrides at startup.
 - Applying a layout while a video plays exits fullscreen if needed, honors the saved width and top-left, recomputes the height for the current video's aspect, and clamps to the monitor.
+
+## Window behavior, size and opacity
+
+Both windows start as normal windows. **Window behavior** in the bar’s overflow menu or the tray menu has:
+
+- **Video always on top** and **Control bar always on top** — independent toggles.
+- **Control bar size** — 80%, 100%, 120% or 140%. You can also drag the bar’s bottom-right grip or hold **Ctrl** and use the wheel.
+- **Control bar opacity** — 100/90/80/70/60/50%.
+- **Video opacity** — 100/90/80/70/60/50%. This uses the Windows layered-window path with mpv’s Blt swapchain. If a particular GPU driver ignores it, keep video opacity at 100% and use **Hide on pause** or the hidden video mode instead.
+
+The pin button is a shortcut for **Control bar always on top**. With topmost off, clicking a visible part of the bar raises it above the video without taking focus.
 
 ## YouTube browser
 

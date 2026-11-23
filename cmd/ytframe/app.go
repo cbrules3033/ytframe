@@ -114,12 +114,17 @@ type App struct {
 	updating     bool
 	pollCount    int
 
-	cbHwnd      uintptr
-	cbVisible   bool
-	cbReady     bool
-	cbScale     float64
-	cbSuper     int
-	cbDrawScale float64
+	cbHwnd       uintptr
+	cbVisible    bool
+	cbReady      bool
+	cbBaseScale  float64
+	cbScale      float64
+	cbSuper      int
+	cbDrawScale  float64
+	cbGripRect   RECT
+	cbResizeDrag bool
+	cbResizeFrom POINT
+	cbResizeBase float64
 
 	cbFontBody   uintptr
 	cbFontLabel  uintptr
@@ -584,15 +589,14 @@ func (a *App) showTrayMenu() {
 	}
 	sep()
 
-	ontop := a.settings.Ontop
-	if hasPlayer {
-		ontop = st.Ontop
+	if wmenu, _, _ := pCreatePopupMenu.Call(); wmenu != 0 {
+		a.buildWindowBehaviorMenu(wmenu)
+		pAppendMenuW.Call(menu, MF_POPUP|MF_STRING, wmenu, uintptr(unsafe.Pointer(u16("Window behavior"))))
 	}
 	fsLabel := "Fullscreen"
 	if hasPlayer && st.Fullscreen {
 		fsLabel = "Exit fullscreen"
 	}
-	add(check(ontop), 104, "Always on top (video)")
 	add(base, 105, fsLabel)
 	sep()
 
@@ -688,6 +692,12 @@ func (a *App) onMenuCommand(id int) {
 		a.clearBrowseData()
 	case id == 142:
 		a.closeBrowse()
+	case id >= 150 && id <= 153:
+		a.setBarScale([]float64{0.8, 1, 1.2, 1.4}[id-150], true)
+	case id >= 160 && id <= 165:
+		a.setBarOpacity([]int{100, 90, 80, 70, 60, 50}[id-160])
+	case id >= 170 && id <= 175:
+		a.setVideoOpacity([]int{100, 90, 80, 70, 60, 50}[id-170])
 	case id >= 200 && id <= 203:
 		q := "best"
 		switch id {
@@ -1261,6 +1271,7 @@ func (a *App) placePlayerWindow(id int) {
 	a.settings.X, a.settings.Y, a.settings.Width, a.settings.Height = x, y, w, h
 	a.settings.HasRect = true
 	a.switchRectValid = false
+	a.applyVideoOpacity()
 }
 
 func (a *App) snapAspect() {

@@ -1,4 +1,4 @@
-YTFrame 1.3.5
+YTFrame 1.4.0
 =============
 
 A borderless, video-only YouTube window with a floating control bar and a
@@ -19,8 +19,9 @@ click "More info" -> "Run anyway".
 
 CONTROL BAR
 -----------
-A separate window, usable even when the video is tiny. Always on top by
-default (pin toggles it). It never steals keyboard focus. The 1.3.4 remote
+A separate window, usable even when the video is tiny. It starts as a normal
+window; use the pin or Window behavior -> Control bar always on top to keep
+it above other apps. It never steals keyboard focus. The 1.3.4 remote
 has a larger card, a dedicated timeline, a large play button and consistent
 rounded icons. The card and icons are supersampled and filtered down, with
 text drawn at native resolution so both stay crisp.
@@ -68,6 +69,23 @@ and recomputes the height for the current video aspect.
 Switching to another video reuses the same player window and keeps it on the
 same monitor, instead of reopening on the monitor where the browser or mouse
 is.
+
+WINDOW BEHAVIOR / SIZE / OPACITY
+--------------------------------
+Tray -> Window behavior, or the remote's overflow menu, has:
+  Video always on top            independent from the bar
+  Control bar always on top      same as the pin button
+  Control bar size               80 / 100 / 120 / 140%
+  Control bar opacity            100 / 90 / 80 / 70 / 60 / 50%
+  Video opacity                  100 / 90 / 80 / 70 / 60 / 50%
+
+Resize the bar by dragging its bottom-right grip, or hold Ctrl and use the
+mouse wheel. Both windows start as normal windows. With topmost off, click a
+visible part of the bar to raise it above the video without taking focus.
+
+Video opacity uses the layered-window path with mpv's Blt swapchain. If your
+GPU driver ignores it, leave video opacity at 100% and use Hide on pause or
+the audio-only video mode instead.
 
 YOUTUBE BROWSER
 ---------------

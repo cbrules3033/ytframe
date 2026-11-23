@@ -91,6 +91,9 @@ func (p *Player) start(url string, startSec int) error {
 	args := []string{
 		"--no-config",
 		"--no-border",
+		// Blt presentation lets per-window alpha work for the stealth opacity
+		// setting; flip-model swapchains ignore SetLayeredWindowAttributes.
+		"--d3d11-flip=no",
 		"--no-osd-bar",
 		"--osd-level=1",
 		"--osd-duration=1000",

@@ -234,6 +234,13 @@ func (a *App) cbPaint(hdc uintptr) {
 	a.cbDrawSeek(dc)
 	a.cbDrawTransport(dc)
 
+	// Resize grip in the bottom-right corner.
+	gx, gy := dw-px(14), dh-px(14)
+	for i := 1; i <= 3; i++ {
+		d := px(float64(4 * i))
+		cbLine(dc, gx-d, gy, gx, gy-d, a.cbPenSurface)
+	}
+
 	a.cbScale = oldScale
 	a.cbSeekRect, a.cbTimeRect, a.cbVolRect, a.cbBtn = oldSeek, oldTime, oldVol, oldBtn
 

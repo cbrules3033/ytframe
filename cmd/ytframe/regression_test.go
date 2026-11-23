@@ -5,6 +5,7 @@ package main
 import (
 	"encoding/json"
 	"math"
+	"os"
 	"runtime"
 	"strconv"
 	"testing"
@@ -58,6 +59,22 @@ func TestDuplicateBrowserNavigationDoesNotRestartLoad(t *testing.T) {
 	a.startPlayback(u, true)
 	if !a.loading || a.loadingURL != u {
 		t.Fatal("a duplicate navigation event restarted or canceled the active load")
+	}
+}
+
+func TestOldSettingsDefaultToNormalWindows(t *testing.T) {
+	previous := dataDirPath
+	dataDirPath = t.TempDir()
+	defer func() { dataDirPath = previous }()
+	if err := os.WriteFile(settingsPath(), []byte(`{"bar_ontop":true,"bar_visible":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := loadSettings()
+	if s.BarOntop {
+		t.Fatal("old always-on-top setting was not migrated")
+	}
+	if s.BarScale != 1 || s.BarOpacity != 100 || s.VideoOpacity != 100 {
+		t.Fatalf("new window settings were not initialised: %+v", s)
 	}
 }
 

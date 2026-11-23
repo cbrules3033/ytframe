@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const appVersion = "1.3.5"
+const appVersion = "1.4.0"
 
 const layoutSlots = 5
 
@@ -43,6 +43,9 @@ type Settings struct {
 	VideoMode     string              `json:"video_mode"`
 	BarVisible    bool                `json:"bar_visible"`
 	BarOntop      bool                `json:"bar_ontop"`
+	BarScale      float64             `json:"bar_scale"`
+	BarOpacity    int                 `json:"bar_opacity"`
+	VideoOpacity  int                 `json:"video_opacity"`
 	BarX          int32               `json:"bar_x"`
 	BarY          int32               `json:"bar_y"`
 	BarHasPos     bool                `json:"bar_has_pos"`
@@ -60,7 +63,8 @@ func defaultSettings() Settings {
 	return Settings{
 		Width: 960, Height: 540, Volume: 100,
 		Resume: true, Quality: "best", SponsorBlock: true, Controls: false,
-		VideoMode: "auto", BarVisible: true, BarOntop: true,
+		VideoMode: "auto", BarVisible: true, BarOntop: false,
+		BarScale: 1, BarOpacity: 100, VideoOpacity: 100,
 		DefaultLayout: -1, BrowseWidth: 1200, BrowseHeight: 800,
 	}
 }
@@ -94,9 +98,14 @@ func settingsPath() string { return filepath.Join(dataDirPath, "settings.json") 
 
 func loadSettings() Settings {
 	s := defaultSettings()
+	hasWindowSettings := true
 	b, err := os.ReadFile(settingsPath())
 	if err == nil {
 		json.Unmarshal(b, &s)
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(b, &fields) == nil {
+			_, hasWindowSettings = fields["bar_scale"]
+		}
 	}
 	if s.Width < 100 || s.Height < 60 {
 		s.Width, s.Height = 960, 540
@@ -119,6 +128,23 @@ func loadSettings() Settings {
 	}
 	if s.BrowseWidth < 640 || s.BrowseHeight < 480 {
 		s.BrowseWidth, s.BrowseHeight = 1200, 800
+	}
+	if !hasWindowSettings {
+		// Older builds defaulted the remote to always-on-top. The new default
+		// is a normal window; users can still pin it from the remote.
+		s.BarScale = 1
+		s.BarOpacity = 100
+		s.VideoOpacity = 100
+		s.BarOntop = false
+	}
+	if s.BarScale < 0.7 || s.BarScale > 1.5 {
+		s.BarScale = 1
+	}
+	if s.BarOpacity < 30 || s.BarOpacity > 100 {
+		s.BarOpacity = 100
+	}
+	if s.VideoOpacity < 30 || s.VideoOpacity > 100 {
+		s.VideoOpacity = 100
 	}
 	return s
 }

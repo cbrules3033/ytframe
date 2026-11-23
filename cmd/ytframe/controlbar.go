@@ -40,9 +40,13 @@ var cbProcCB uintptr
 func init() { cbProcCB = syscall.NewCallback(cbWndProc) }
 
 func (a *App) createControlBar() {
-	if a.cbScale == 0 {
-		a.cbScale = a.scale
+	if a.cbBaseScale == 0 {
+		a.cbBaseScale = a.scale
+		if a.cbBaseScale <= 0 {
+			a.cbBaseScale = 1
+		}
 	}
+	a.cbScale = a.cbBaseScale * a.settings.BarScale
 	a.cbEnsureGDI()
 	hInst := getModuleHandle()
 	var wc WNDCLASSEXW
@@ -57,7 +61,7 @@ func (a *App) createControlBar() {
 	w := int32(cbW * a.cbScale)
 	h := int32(cbH * a.cbScale)
 	hwnd, _, _ := pCreateWindowExW.Call(
-		WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,
+		WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,
 		uintptr(unsafe.Pointer(u16("YTFrameControls"))),
 		uintptr(unsafe.Pointer(u16("YTFrame controls"))),
 		WS_POPUP,
@@ -72,6 +76,7 @@ func (a *App) createControlBar() {
 	a.cbHover = -1
 	a.cbPress = -1
 	a.cbLayout()
+	a.applyBarOpacity()
 	logf("control bar created")
 }
 
@@ -211,6 +216,8 @@ func (a *App) cbLayout() {
 	pGetClientRect.Call(a.cbHwnd, uintptr(unsafe.Pointer(&rc)))
 	w, h := rc.Right, rc.Bottom
 	a.cbSeekRect, a.cbTimeRect, a.cbVolRect, a.cbBtn = cbLayoutAt(a.cbScale)
+	g := int32(math.Round(20 * a.cbScale))
+	a.cbGripRect = RECT{Left: w - g, Top: h - g, Right: w, Bottom: h}
 
 	r := int32(20 * a.cbScale)
 	rgn, _, _ := pCreateRoundRectRgn.Call(0, 0, uintptr(w+1), uintptr(h+1), uintptr(r*2), uintptr(r*2))
@@ -241,6 +248,13 @@ func (a *App) showControlBar() {
 	if a.cbHwnd == 0 {
 		return
 	}
+	if a.cbBaseScale == 0 {
+		a.cbBaseScale = a.scale
+		if a.cbBaseScale <= 0 {
+			a.cbBaseScale = 1
+		}
+	}
+	a.cbScale = a.cbBaseScale * a.settings.BarScale
 	w := int32(cbW * a.cbScale)
 	h := int32(cbH * a.cbScale)
 	x, y := a.cbPosition(w, h)
@@ -252,6 +266,7 @@ func (a *App) showControlBar() {
 	a.cbReadState()
 	a.cbVisible = true
 	a.cbLayout()
+	a.applyBarOpacity()
 	pShowWindow.Call(a.cbHwnd, SW_SHOWNOACTIVATE)
 	a.cbInvalidate()
 	a.applyVideoVisibility()
@@ -298,6 +313,90 @@ func (a *App) setBarOntop(on bool) {
 		pSetWindowPos.Call(a.cbHwnd, z, 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE)
 	}
 	a.cbInvalidate()
+}
+
+func (a *App) setBarScale(scale float64, persist bool) {
+	if scale < 0.7 {
+		scale = 0.7
+	}
+	if scale > 1.5 {
+		scale = 1.5
+	}
+	if math.Abs(scale-a.settings.BarScale) < 0.001 {
+		return
+	}
+	a.settings.BarScale = scale
+	if a.cbHwnd == 0 {
+		if persist {
+			saveSettings(a.settings)
+		}
+		return
+	}
+	if a.cbBaseScale == 0 {
+		a.cbBaseScale = a.scale
+		if a.cbBaseScale <= 0 {
+			a.cbBaseScale = 1
+		}
+	}
+	a.cbScale = a.cbBaseScale * scale
+	a.cbFreeGDI()
+	a.cbEnsureGDI()
+
+	var rc RECT
+	pGetWindowRect.Call(a.cbHwnd, uintptr(unsafe.Pointer(&rc)))
+	w := int32(math.Round(cbW * a.cbScale))
+	h := int32(math.Round(cbH * a.cbScale))
+	work := workAreaAt(rc.Left+w/2, rc.Top+h/2)
+	x := clamp(rc.Left, work.Left, work.Right-w)
+	y := clamp(rc.Top, work.Top, work.Bottom-h)
+	pSetWindowPos.Call(a.cbHwnd, 0, uintptr(x), uintptr(y), uintptr(w), uintptr(h),
+		SWP_NOZORDER|SWP_NOACTIVATE)
+	a.settings.BarX, a.settings.BarY = x, y
+	a.settings.BarHasPos = true
+	a.cbLayout()
+	a.cbInvalidate()
+	if persist {
+		saveSettings(a.settings)
+	}
+}
+
+func (a *App) setBarOpacity(percent int) {
+	if percent < 30 {
+		percent = 30
+	}
+	if percent > 100 {
+		percent = 100
+	}
+	a.settings.BarOpacity = percent
+	a.applyBarOpacity()
+	saveSettings(a.settings)
+	a.cbInvalidate()
+}
+
+func (a *App) applyBarOpacity() {
+	if a.cbHwnd != 0 {
+		setWindowOpacity(a.cbHwnd, a.settings.BarOpacity)
+	}
+}
+
+func (a *App) setVideoOpacity(percent int) {
+	if percent < 30 {
+		percent = 30
+	}
+	if percent > 100 {
+		percent = 100
+	}
+	a.settings.VideoOpacity = percent
+	a.applyVideoOpacity()
+	saveSettings(a.settings)
+}
+
+func (a *App) applyVideoOpacity() {
+	if p := a.player; p != nil {
+		if hwnd := p.hwndNow(); hwnd != 0 {
+			setWindowOpacity(hwnd, a.settings.VideoOpacity)
+		}
+	}
 }
 
 func (a *App) cbInvalidate() {
@@ -385,7 +484,8 @@ func cbWndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 		a.cbLayout()
 		return 0
 	case WM_DPICHANGED:
-		a.cbScale = float64(loword(wparam)) / 96
+		a.cbBaseScale = float64(loword(wparam)) / 96
+		a.cbScale = a.cbBaseScale * a.settings.BarScale
 		a.cbFreeGDI()
 		a.cbEnsureGDI()
 		r := (*RECT)(unsafe.Pointer(lparam))
@@ -410,6 +510,18 @@ func cbWndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 		return maNoActivate
 	case WM_MOUSEMOVE:
 		x, y := mouseX(lparam), mouseY(lparam)
+		if a.cbResizeDrag {
+			var pt POINT
+			pGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
+			dx := pt.X - a.cbResizeFrom.X
+			dy := pt.Y - a.cbResizeFrom.Y
+			d := dx
+			if dy > d {
+				d = dy
+			}
+			a.setBarScale(a.cbResizeBase+float64(d)/float64(cbW), false)
+			return 0
+		}
 		if a.cbDrag {
 			var pt POINT
 			pGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
@@ -448,7 +560,22 @@ func cbWndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 		}
 		return 0
 	case WM_LBUTTONDOWN:
+		if !a.settings.BarOntop {
+			// In normal-window mode, clicking the bar brings it above the
+			// video without taking keyboard focus.
+			pSetWindowPos.Call(hwnd, 0, 0, 0, 0, 0,
+				SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE)
+		}
 		x, y := mouseX(lparam), mouseY(lparam)
+		if pointIn(a.cbGripRect, x, y) {
+			a.cbResizeDrag = true
+			a.cbResizeBase = a.settings.BarScale
+			var pt POINT
+			pGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
+			a.cbResizeFrom = pt
+			pSetCapture.Call(hwnd)
+			return 0
+		}
 		if a.cbHitSeek(x, y) {
 			a.cbSeekDrag = true
 			a.cbSeekHover = true
@@ -486,6 +613,13 @@ func cbWndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 		return 0
 	case WM_LBUTTONUP:
 		x, y := mouseX(lparam), mouseY(lparam)
+		if a.cbResizeDrag {
+			a.cbResizeDrag = false
+			pReleaseCapture.Call()
+			saveSettings(a.settings)
+			a.cbSavePosition()
+			return 0
+		}
 		if a.cbSeekDrag {
 			a.cbSeekDrag = false
 			pReleaseCapture.Call()
@@ -517,12 +651,20 @@ func cbWndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 		}
 		return 0
 	case WM_CAPTURECHANGED, WM_CANCELMODE:
-		a.cbDrag, a.cbSeekDrag, a.cbVolDrag = false, false, false
+		a.cbDrag, a.cbSeekDrag, a.cbVolDrag, a.cbResizeDrag = false, false, false, false
 		a.cbPress = -1
 		a.cbInvalidate()
 		return 0
 	case WM_MOUSEWHEEL:
 		delta := int16(hiword(wparam))
+		if ctrl, _, _ := pGetKeyState.Call(VK_CONTROL); int16(ctrl) < 0 {
+			step := 0.05
+			if delta < 0 {
+				step = -step
+			}
+			a.setBarScale(a.settings.BarScale+step, true)
+			return 0
+		}
 		if p := a.player; p != nil {
 			vol := a.cbLastVol
 			if delta > 0 {
@@ -551,6 +693,11 @@ func cbWndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 		var rc RECT
 		pGetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&rc)))
 		cx, cy := pt.X-rc.Left, pt.Y-rc.Top
+		if pointIn(a.cbGripRect, cx, cy) {
+			h, _, _ := pLoadCursorW.Call(0, IDC_SIZENWSE)
+			pSetCursor.Call(h)
+			return 1
+		}
 		if a.cbHitButton(cx, cy) >= 0 || a.cbHitSeek(cx, cy) || a.cbHitVolume(cx, cy) {
 			h, _, _ := pLoadCursorW.Call(0, IDC_HAND)
 			pSetCursor.Call(h)
@@ -963,6 +1110,13 @@ func (a *App) moveBarTo(x, y int32) {
 	if a.cbHwnd == 0 {
 		return
 	}
+	if a.cbBaseScale == 0 {
+		a.cbBaseScale = a.scale
+		if a.cbBaseScale <= 0 {
+			a.cbBaseScale = 1
+		}
+	}
+	a.cbScale = a.cbBaseScale * a.settings.BarScale
 	w := int32(cbW * a.cbScale)
 	h := int32(cbH * a.cbScale)
 	work := workAreaAt(x+w/2, y+h/2)
@@ -1038,6 +1192,61 @@ func (a *App) showLayoutsMenu() {
 	}
 }
 
+func addMenuString(menu uintptr, flags uintptr, id int, text string) {
+	pAppendMenuW.Call(menu, flags, uintptr(id), uintptr(unsafe.Pointer(u16(text))))
+}
+
+func (a *App) buildWindowBehaviorMenu(menu uintptr) {
+	check := func(on bool) uintptr {
+		f := uintptr(MF_STRING)
+		if on {
+			f |= MF_CHECKED
+		}
+		return f
+	}
+	ontop := a.settings.Ontop
+	if p := a.player; p != nil {
+		ontop = p.snapshot().Ontop
+	}
+	addMenuString(menu, check(ontop), 104, "Video always on top")
+	addMenuString(menu, check(a.settings.BarOntop), 116, "Control bar always on top")
+	pAppendMenuW.Call(menu, MF_SEPARATOR, 0, 0)
+
+	if size, _, _ := pCreatePopupMenu.Call(); size != 0 {
+		for i, item := range []struct {
+			scale float64
+			label string
+		}{{0.8, "Compact (80%)"}, {1, "Normal (100%)"}, {1.2, "Large (120%)"}, {1.4, "Extra large (140%)"}} {
+			flags := uintptr(MF_STRING)
+			if math.Abs(a.settings.BarScale-item.scale) < 0.01 {
+				flags |= MF_CHECKED
+			}
+			addMenuString(size, flags, 150+i, item.label)
+		}
+		pAppendMenuW.Call(menu, MF_POPUP|MF_STRING, size, uintptr(unsafe.Pointer(u16("Control bar size"))))
+	}
+	if opacity, _, _ := pCreatePopupMenu.Call(); opacity != 0 {
+		for i, pct := range []int{100, 90, 80, 70, 60, 50} {
+			flags := uintptr(MF_STRING)
+			if a.settings.BarOpacity == pct {
+				flags |= MF_CHECKED
+			}
+			addMenuString(opacity, flags, 160+i, fmt.Sprintf("%d%%", pct))
+		}
+		pAppendMenuW.Call(menu, MF_POPUP|MF_STRING, opacity, uintptr(unsafe.Pointer(u16("Control bar opacity"))))
+	}
+	if opacity, _, _ := pCreatePopupMenu.Call(); opacity != 0 {
+		for i, pct := range []int{100, 90, 80, 70, 60, 50} {
+			flags := uintptr(MF_STRING)
+			if a.settings.VideoOpacity == pct {
+				flags |= MF_CHECKED
+			}
+			addMenuString(opacity, flags, 170+i, fmt.Sprintf("%d%%", pct))
+		}
+		pAppendMenuW.Call(menu, MF_POPUP|MF_STRING, opacity, uintptr(unsafe.Pointer(u16("Video opacity"))))
+	}
+}
+
 func (a *App) cbShowMenu() {
 	menu, _, _ := pCreatePopupMenu.Call()
 	if menu == 0 {
@@ -1058,20 +1267,11 @@ func (a *App) cbShowMenu() {
 		add(flags, m.id, videoModeLabel(m.mode))
 	}
 	pAppendMenuW.Call(menu, MF_SEPARATOR, 0, 0)
+	if wmenu, _, _ := pCreatePopupMenu.Call(); wmenu != 0 {
+		a.buildWindowBehaviorMenu(wmenu)
+		pAppendMenuW.Call(menu, MF_POPUP|MF_STRING, wmenu, uintptr(unsafe.Pointer(u16("Window behavior"))))
+	}
 	flags := uintptr(MF_STRING)
-	if a.settings.BarOntop {
-		flags |= MF_CHECKED
-	}
-	add(flags, 116, "Control bar always on top")
-	ontop := a.settings.Ontop
-	if p := a.player; p != nil {
-		ontop = p.snapshot().Ontop
-	}
-	flags = uintptr(MF_STRING)
-	if ontop {
-		flags |= MF_CHECKED
-	}
-	add(flags, 104, "Video always on top")
 
 	quality, _, _ := pCreatePopupMenu.Call()
 	if quality != 0 {
