@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	cbW = 600
-	cbH = 152
+	cbW = 640
+	cbH = 168
 
 	// A no-activate popup still receives clicks, but returning this explicitly
 	// prevents Windows from consuming the first click in the activation policy.
@@ -89,19 +89,36 @@ func (a *App) cbEnsureGDI() {
 		)
 		return h
 	}
-	a.cbFontBody = mk(15, FW_SEMIBOLD)
-	a.cbFontSmall = mk(11, FW_NORMAL)
-	a.cbFontTime = mk(12.5, FW_NORMAL)
-	a.cbBrBg, _, _ = pCreateSolidBrush.Call(colBg)
-	a.cbBrPanel, _, _ = pCreateSolidBrush.Call(colField)
-	a.cbBrHover, _, _ = pCreateSolidBrush.Call(rgb(37, 42, 49))
-	a.cbBrAccent, _, _ = pCreateSolidBrush.Call(colAccent)
-	a.cbBrIcon, _, _ = pCreateSolidBrush.Call(colText)
-	a.cbBrMuted, _, _ = pCreateSolidBrush.Call(colMuted)
-	a.cbPenBorder, _, _ = pCreatePen.Call(PS_SOLID, 1, colBorder)
-	a.cbPenIcon, _, _ = pCreatePen.Call(PS_SOLID, uintptr(maxInt(1, int(1.6*s))), colText)
-	a.cbPenMuted, _, _ = pCreatePen.Call(PS_SOLID, uintptr(maxInt(1, int(1.4*s))), colMuted)
-	a.cbPenAccent, _, _ = pCreatePen.Call(PS_SOLID, uintptr(maxInt(1, int(2*s))), colAccent)
+	mkBrush := func(c uintptr) uintptr {
+		h, _, _ := pCreateSolidBrush.Call(c)
+		return h
+	}
+	mkPen := func(width float64, c uintptr) uintptr {
+		lb := LOGBRUSH{Style: bsSolid, Color: uint32(c)}
+		w := uintptr(maxInt(1, int(math.Round(width*s))))
+		h, _, _ := pExtCreatePen.Call(psGeometric|PS_SOLID, w, uintptr(unsafe.Pointer(&lb)), 0, 0)
+		return h
+	}
+	a.cbFontBody = mk(14.5, FW_SEMIBOLD)
+	a.cbFontLabel = mk(11.5, FW_SEMIBOLD)
+	a.cbFontSmall = mk(7.5, FW_SEMIBOLD)
+	a.cbFontTime = mk(10.5, FW_NORMAL)
+	a.cbBrBg = mkBrush(cbColBg)
+	a.cbBrPanel = mkBrush(cbColSurface)
+	a.cbBrHover = mkBrush(cbColSurfaceHover)
+	a.cbBrPress = mkBrush(cbColSurfacePress)
+	a.cbBrAccent = mkBrush(cbColAccent)
+	a.cbBrAccentHi = mkBrush(cbColAccentHover)
+	a.cbBrAccentLo = mkBrush(cbColAccentPress)
+	a.cbBrIcon = mkBrush(cbColText)
+	a.cbBrMuted = mkBrush(cbColMuted)
+	a.cbBrTrack = mkBrush(cbColTrack)
+	a.cbPenBorder, _, _ = pCreatePen.Call(PS_SOLID, 1, cbColBorder)
+	a.cbPenSurface, _, _ = pCreatePen.Call(PS_SOLID, 1, cbColSurfaceBorder)
+	a.cbPenDivider, _, _ = pCreatePen.Call(PS_SOLID, 1, cbColDivider)
+	a.cbPenIcon = mkPen(1.7, cbColText)
+	a.cbPenMuted = mkPen(1.5, cbColMuted)
+	a.cbPenAccent = mkPen(2.0, cbColAccent)
 	a.cbReady = true
 }
 
@@ -114,9 +131,11 @@ func (a *App) cbFreeGDI() {
 		pDeleteObject.Call(a.cbBackBmp)
 		a.cbBackBmp = 0
 	}
-	for _, h := range []uintptr{a.cbFontBody, a.cbFontSmall, a.cbFontTime,
-		a.cbBrBg, a.cbBrPanel, a.cbBrHover, a.cbBrAccent, a.cbBrIcon, a.cbBrMuted,
-		a.cbPenBorder, a.cbPenIcon, a.cbPenMuted, a.cbPenAccent} {
+	for _, h := range []uintptr{a.cbFontBody, a.cbFontLabel, a.cbFontSmall, a.cbFontTime,
+		a.cbBrBg, a.cbBrPanel, a.cbBrHover, a.cbBrPress, a.cbBrAccent,
+		a.cbBrAccentHi, a.cbBrAccentLo, a.cbBrIcon, a.cbBrMuted, a.cbBrTrack,
+		a.cbPenBorder, a.cbPenSurface, a.cbPenDivider,
+		a.cbPenIcon, a.cbPenMuted, a.cbPenAccent} {
 		if h != 0 {
 			pDeleteObject.Call(h)
 		}
@@ -147,24 +166,25 @@ func (a *App) cbLayout() {
 			Bottom: int32(math.Round((y + hh) * s)),
 		}
 	}
-	// Clear top-level actions, a full-width timeline and a balanced transport row.
-	a.cbSeekRect = R(22, 78, 556, 4)
-	a.cbTimeRect = R(372, 43, 206, 22)
-	a.cbBtn[cbBtnBack] = R(30, 103, 36, 36)
-	a.cbBtn[cbBtnPlay] = R(74, 99, 44, 44)
-	a.cbBtn[cbBtnFwd] = R(126, 103, 36, 36)
-	a.cbBtn[cbBtnVol] = R(186, 103, 36, 36)
-	a.cbVolRect = R(232, 119, 100, 4)
-	a.cbBtn[cbBtnFullscreen] = R(374, 103, 36, 36)
-	a.cbBtn[cbBtnEye] = R(422, 103, 36, 36)
-	a.cbBtn[cbBtnLayouts] = R(470, 103, 36, 36)
-	a.cbBtn[cbBtnPin] = R(518, 103, 36, 36)
-	a.cbBtn[cbBtnOpen] = R(356, 11, 64, 30)
-	a.cbBtn[cbBtnBrowse] = R(426, 11, 84, 30)
-	a.cbBtn[cbBtnMenu] = R(516, 11, 30, 30)
-	a.cbBtn[cbBtnHide] = R(552, 11, 30, 30)
 
-	r := int32(16 * s)
+	// A calm two-row card: title/actions, timeline, then transport.
+	a.cbSeekRect = R(18, 74, 604, 5)
+	a.cbTimeRect = R(368, 46, 252, 18)
+	a.cbBtn[cbBtnBack] = R(18, 108, 36, 36)
+	a.cbBtn[cbBtnPlay] = R(62, 96, 58, 58)
+	a.cbBtn[cbBtnFwd] = R(128, 108, 36, 36)
+	a.cbBtn[cbBtnVol] = R(184, 108, 36, 36)
+	a.cbVolRect = R(228, 126, 112, 4)
+	a.cbBtn[cbBtnFullscreen] = R(454, 108, 36, 36)
+	a.cbBtn[cbBtnEye] = R(498, 108, 36, 36)
+	a.cbBtn[cbBtnLayouts] = R(542, 108, 36, 36)
+	a.cbBtn[cbBtnPin] = R(586, 108, 36, 36)
+	a.cbBtn[cbBtnOpen] = R(368, 13, 74, 30)
+	a.cbBtn[cbBtnBrowse] = R(450, 13, 92, 30)
+	a.cbBtn[cbBtnMenu] = R(550, 13, 30, 30)
+	a.cbBtn[cbBtnHide] = R(588, 13, 30, 30)
+
+	r := int32(20 * s)
 	rgn, _, _ := pCreateRoundRectRgn.Call(0, 0, uintptr(w+1), uintptr(h+1), uintptr(r*2), uintptr(r*2))
 	if rgn != 0 {
 		pSetWindowRgn.Call(a.cbHwnd, rgn, 1)
@@ -381,8 +401,10 @@ func cbWndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 			return 0
 		}
 		h := a.cbHitButton(x, y)
-		if h != a.cbHover {
-			a.cbHover = h
+		sh := a.cbHitSeek(x, y)
+		vh := a.cbHitVolume(x, y)
+		if h != a.cbHover || sh != a.cbSeekHover || vh != a.cbVolHover {
+			a.cbHover, a.cbSeekHover, a.cbVolHover = h, sh, vh
 			a.cbInvalidate()
 		}
 		var tme TRACKMOUSEEVENT
@@ -392,8 +414,8 @@ func cbWndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 		pTrackMouseEvent.Call(uintptr(unsafe.Pointer(&tme)))
 		return 0
 	case WM_MOUSELEAVE:
-		if a.cbHover != -1 {
-			a.cbHover = -1
+		if a.cbHover != -1 || a.cbSeekHover || a.cbVolHover {
+			a.cbHover, a.cbSeekHover, a.cbVolHover = -1, false, false
 			a.cbInvalidate()
 		}
 		return 0
@@ -401,6 +423,7 @@ func cbWndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 		x, y := mouseX(lparam), mouseY(lparam)
 		if a.cbHitSeek(x, y) {
 			a.cbSeekDrag = true
+			a.cbSeekHover = true
 			a.cbSeekTarget = a.cbSeekAt(x)
 			pSetCapture.Call(hwnd)
 			a.cbInvalidate()
@@ -408,6 +431,7 @@ func cbWndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 		}
 		if a.cbHitVolume(x, y) {
 			a.cbVolDrag = true
+			a.cbVolHover = true
 			a.cbSetVolumeAt(x)
 			pSetCapture.Call(hwnd)
 			return 0
@@ -653,406 +677,6 @@ func (a *App) cbEnabled(id int) bool {
 		return !a.loading && !a.cbIdle
 	}
 	return true
-}
-
-func (a *App) cbPaint(hdc uintptr) {
-	a.cbPaintCount++
-	var rc RECT
-	pGetClientRect.Call(a.cbHwnd, uintptr(unsafe.Pointer(&rc)))
-	w, h := rc.Right, rc.Bottom
-	if w <= 0 || h <= 0 {
-		return
-	}
-	if a.cbBackDC == 0 || a.cbBackW != w || a.cbBackH != h {
-		if a.cbBackDC != 0 {
-			pDeleteDC.Call(a.cbBackDC)
-		}
-		if a.cbBackBmp != 0 {
-			pDeleteObject.Call(a.cbBackBmp)
-		}
-		a.cbBackDC, _, _ = pCreateCompatibleDC.Call(hdc)
-		a.cbBackBmp, _, _ = pCreateCompatibleBmp.Call(hdc, uintptr(w), uintptr(h))
-		a.cbBackW, a.cbBackH = w, h
-		pSelectObject.Call(a.cbBackDC, a.cbBackBmp)
-	}
-	dc := a.cbBackDC
-	if dc == 0 {
-		return
-	}
-	s := a.cbScale
-	pFillRect.Call(dc, uintptr(unsafe.Pointer(&rc)), a.cbBrBg)
-	pSelectObject.Call(dc, pGetStockObject2(NULL_BRUSH))
-	pSelectObject.Call(dc, a.cbPenBorder)
-	pRoundRect.Call(dc, 1, 1, uintptr(w-1), uintptr(h-1),
-		uintptr(int32(32*s)), uintptr(int32(32*s)))
-
-	// Current video, with enough room for long titles.
-	pSelectObject.Call(dc, a.cbFontBody)
-	pSetTextColor.Call(dc, colText)
-	pSetBkMode.Call(dc, TRANSPARENT)
-	title := a.cbTitle
-	if a.loading {
-		title = "Opening video…"
-	} else if title == "" {
-		title = "Ready when you are"
-	}
-	drawText(dc, title, RECT{Left: int32(22 * s), Top: int32(10 * s), Right: int32(340 * s), Bottom: int32(38 * s)}, DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX)
-	// Seek bar.
-	seek := a.cbSeekRect
-	frac := 0.0
-	if a.cbLastDur > 0 {
-		frac = a.cbLastPos / a.cbLastDur
-	}
-	if a.cbSeekDrag {
-		frac = a.cbSeekTarget / math.Max(1, a.cbLastDur)
-	}
-	frac = math.Max(0, math.Min(1, frac))
-	pSelectObject.Call(dc, pGetStockObject2(NULL_PEN))
-	pSelectObject.Call(dc, a.cbBrPanel)
-	pRoundRect.Call(dc, uintptr(seek.Left), uintptr(seek.Top), uintptr(seek.Right), uintptr(seek.Bottom), 4, 4)
-	fillW := int32(float64(seek.Right-seek.Left) * frac)
-	if a.loading {
-		span := int32(80 * s)
-		phase := float64(time.Now().UnixMilli()%1400) / 1400
-		left := seek.Left + int32(phase*float64(rectW(seek)-span))
-		fillRect(dc, RECT{Left: left, Top: seek.Top, Right: left + span, Bottom: seek.Bottom}, a.cbBrAccent)
-	}
-	if fillW > 0 {
-		pSelectObject.Call(dc, a.cbBrAccent)
-		pRoundRect.Call(dc, uintptr(seek.Left), uintptr(seek.Top), uintptr(seek.Left+fillW), uintptr(seek.Bottom), 4, 4)
-		kr := int32(4 * s)
-		cx := seek.Left + fillW
-		cy := (seek.Top + seek.Bottom) / 2
-		pSelectObject.Call(dc, a.cbBrAccent)
-		pEllipse.Call(dc, uintptr(cx-kr), uintptr(cy-kr), uintptr(cx+kr), uintptr(cy+kr))
-	}
-
-	// Time / status.
-	pSelectObject.Call(dc, a.cbFontTime)
-	statusActive := a.cbStatus != "" && time.Now().Before(a.cbStatusUntil)
-	var text string
-	if statusActive {
-		text = a.cbStatus
-		pSetTextColor.Call(dc, colAccent)
-	} else if a.loading {
-		text = "Opening…"
-		pSetTextColor.Call(dc, colAccent)
-	} else if a.cbIdle {
-		text = "Ctrl+Alt+V · Open a link"
-		pSetTextColor.Call(dc, colMuted)
-	} else if a.cbLastDur > 0 {
-		cur := a.cbLastPos
-		if a.cbSeekDrag {
-			cur = a.cbSeekTarget
-		}
-		text = clockStr(cur) + " / " + clockStr(a.cbLastDur)
-		pSetTextColor.Call(dc, colMuted)
-	} else if a.loading {
-		text = "Loading…"
-		pSetTextColor.Call(dc, colMuted)
-	} else {
-		text = "LIVE"
-		pSetTextColor.Call(dc, colMuted)
-	}
-	pSetBkMode.Call(dc, TRANSPARENT)
-	drawText(dc, text, a.cbTimeRect, DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX)
-
-	// Contextual hints make the icon controls discoverable without tooltips
-	// that can cover a small video or take focus from another application.
-	pSelectObject.Call(dc, a.cbFontTime)
-	pSetTextColor.Call(dc, colMuted)
-	hint := a.cbHint()
-	drawText(dc, hint, RECT{Left: int32(22 * s), Top: int32(43 * s), Right: int32(366 * s), Bottom: int32(65 * s)}, DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX)
-
-	// Buttons.
-	for i := 0; i < cbBtnCount; i++ {
-		r := a.cbBtn[i]
-		if i == cbBtnPlay || i == cbBtnBrowse || i == cbBtnOpen || a.cbHover == i || a.cbPress == i {
-			br := a.cbBrHover
-			if i == cbBtnPlay {
-				br = a.cbBrAccent
-			}
-			if (i == cbBtnBrowse || i == cbBtnOpen) && a.cbHover != i {
-				br = a.cbBrPanel
-			}
-			if a.cbPress == i && i != cbBtnPlay {
-				br = a.cbBrPanel
-			}
-			pSelectObject.Call(dc, pGetStockObject2(NULL_PEN))
-			pSelectObject.Call(dc, br)
-			pRoundRect.Call(dc, uintptr(r.Left), uintptr(r.Top), uintptr(r.Right), uintptr(r.Bottom),
-				uintptr(int32(6*s)), uintptr(int32(6*s)))
-		}
-		iconBrush, iconPen := a.cbBrIcon, a.cbPenIcon
-		if !a.cbEnabled(i) {
-			a.cbBrIcon, a.cbPenIcon = a.cbBrMuted, a.cbPenMuted
-		}
-		switch i {
-		case cbBtnPlay:
-			if a.loading {
-				pSelectObject.Call(dc, pGetStockObject2(NULL_PEN))
-				pSelectObject.Call(dc, a.cbBrBg)
-				cx, cy := (r.Left+r.Right)/2, (r.Top+r.Bottom)/2
-				d := int32(6 * s)
-				pRoundRect.Call(dc, uintptr(cx-d), uintptr(cy-d), uintptr(cx+d), uintptr(cy+d), 2, 2)
-			} else {
-				a.cbIconPlay(dc, r, a.cbLastPause)
-			}
-		case cbBtnBack:
-			a.cbIconStep(dc, r, -1)
-		case cbBtnFwd:
-			a.cbIconStep(dc, r, 1)
-		case cbBtnVol:
-			a.cbIconVolume(dc, r, a.cbLastMute)
-		case cbBtnFullscreen:
-			a.cbIconFullscreen(dc, r)
-		case cbBtnEye:
-			a.cbIconEye(dc, r)
-		case cbBtnLayouts:
-			a.cbIconLayouts(dc, r)
-		case cbBtnPin:
-			a.cbIconPin(dc, r)
-		case cbBtnOpen, cbBtnBrowse:
-			pSelectObject.Call(dc, a.cbFontTime)
-			pSetTextColor.Call(dc, colText)
-			label := "Browse"
-			if i == cbBtnOpen {
-				label = "+ Open"
-			}
-			drawText(dc, label, r, DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX)
-		case cbBtnHide:
-			pSelectObject.Call(dc, a.cbPenMuted)
-			cx, cy := (r.Left+r.Right)/2, (r.Top+r.Bottom)/2
-			pMoveToEx.Call(dc, uintptr(cx-int32(6*s)), uintptr(cy), 0)
-			pLineTo.Call(dc, uintptr(cx+int32(6*s)), uintptr(cy))
-		case cbBtnMenu:
-			a.cbIconMenu(dc, r)
-		}
-		a.cbBrIcon, a.cbPenIcon = iconBrush, iconPen
-	}
-
-	// Volume slider.
-	if !a.cbIdle {
-		vr := a.cbVolRect
-		pSelectObject.Call(dc, pGetStockObject2(NULL_PEN))
-		pSelectObject.Call(dc, a.cbBrPanel)
-		pRoundRect.Call(dc, uintptr(vr.Left), uintptr(vr.Top), uintptr(vr.Right), uintptr(vr.Bottom), 3, 3)
-		vf := math.Max(0, math.Min(1, float64(a.cbLastVol)/130.0))
-		if a.cbLastMute {
-			vf = 0
-		}
-		vw := int32(float64(vr.Right-vr.Left) * vf)
-		if vw > 0 {
-			pSelectObject.Call(dc, a.cbBrAccent)
-			pRoundRect.Call(dc, uintptr(vr.Left), uintptr(vr.Top), uintptr(vr.Left+vw), uintptr(vr.Bottom), 3, 3)
-		}
-	}
-
-	// Grip.
-	pSelectObject.Call(dc, a.cbBrIcon)
-	for row := 0; row < 3; row++ {
-		for col := 0; col < 2; col++ {
-			cx := int32((12 + float64(col)*4) * s)
-			cy := int32((114 + float64(row)*6) * s)
-			rr := int32(1.3 * s)
-			pEllipse.Call(dc, uintptr(cx-rr), uintptr(cy-rr), uintptr(cx+rr), uintptr(cy+rr))
-		}
-	}
-
-	pBitBlt.Call(hdc, 0, 0, uintptr(w), uintptr(h), dc, 0, 0, SRCCOPY)
-}
-
-func (a *App) cbIconPlay(dc uintptr, r RECT, paused bool) {
-	s := a.cbScale
-	cx := (r.Left + r.Right) / 2
-	cy := (r.Top + r.Bottom) / 2
-	if paused {
-		sz := int32(7 * s)
-		pts := []POINT{
-			{cx - sz/2, cy - sz}, {cx - sz/2, cy + sz}, {cx + sz, cy},
-		}
-		pSelectObject.Call(dc, pGetStockObject2(NULL_PEN))
-		pSelectObject.Call(dc, a.cbBrBg)
-		pPolygon.Call(dc, uintptr(unsafe.Pointer(&pts[0])), 3)
-	} else {
-		bw := int32(4 * s)
-		gap := int32(4 * s)
-		hh := int32(8 * s)
-		pSelectObject.Call(dc, pGetStockObject2(NULL_PEN))
-		pSelectObject.Call(dc, a.cbBrBg)
-		pRoundRect.Call(dc, uintptr(cx-gap/2-bw), uintptr(cy-hh), uintptr(cx-gap/2), uintptr(cy+hh), 2, 2)
-		pRoundRect.Call(dc, uintptr(cx+gap/2), uintptr(cy-hh), uintptr(cx+gap/2+bw), uintptr(cy+hh), 2, 2)
-	}
-}
-
-func (a *App) cbIconStep(dc uintptr, r RECT, dir int) {
-	s := a.cbScale
-	cx, cy := (r.Left+r.Right)/2, (r.Top+r.Bottom)/2
-	d := int32(11 * s)
-	pSelectObject.Call(dc, a.cbPenIcon)
-	pSelectObject.Call(dc, pGetStockObject2(NULL_BRUSH))
-	if dir < 0 {
-		pArc.Call(dc, uintptr(cx-d), uintptr(cy-d), uintptr(cx+d), uintptr(cy+d), uintptr(cx-int32(5*s)), uintptr(cy-d), uintptr(cx-int32(9*s)), uintptr(cy-int32(3*s)))
-	} else {
-		pArc.Call(dc, uintptr(cx-d), uintptr(cy-d), uintptr(cx+d), uintptr(cy+d), uintptr(cx+int32(9*s)), uintptr(cy-int32(3*s)), uintptr(cx+int32(5*s)), uintptr(cy-d))
-	}
-	x := cx + int32(dir)*int32(8*s)
-	y := cy - int32(9*s)
-	pts := []POINT{{x, y - int32(4*s)}, {x - int32(dir)*int32(6*s), y}, {x, y + int32(4*s)}}
-	pSelectObject.Call(dc, pGetStockObject2(NULL_PEN))
-	pSelectObject.Call(dc, a.cbBrIcon)
-	pPolygon.Call(dc, uintptr(unsafe.Pointer(&pts[0])), 3)
-	pSelectObject.Call(dc, a.cbFontSmall)
-	pSetTextColor.Call(dc, colText)
-	pSetBkMode.Call(dc, TRANSPARENT)
-	drawText(dc, "10", RECT{Left: cx - d, Top: cy - int32(7*s), Right: cx + d, Bottom: cy + int32(9*s)}, DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX)
-}
-
-func (a *App) cbIconVolume(dc uintptr, r RECT, muted bool) {
-	s := a.cbScale
-	cx := (r.Left + r.Right) / 2
-	cy := (r.Top + r.Bottom) / 2
-	px := func(v float64) int32 { return int32(math.Round(v * s)) }
-	pts := []POINT{
-		{cx - px(7), cy - px(3)}, {cx - px(3), cy - px(3)}, {cx + px(2), cy - px(7)},
-		{cx + px(2), cy + px(7)}, {cx - px(3), cy + px(3)}, {cx - px(7), cy + px(3)},
-	}
-	pSelectObject.Call(dc, pGetStockObject2(NULL_PEN))
-	pSelectObject.Call(dc, a.cbBrIcon)
-	pPolygon.Call(dc, uintptr(unsafe.Pointer(&pts[0])), uintptr(len(pts)))
-	pSelectObject.Call(dc, a.cbPenIcon)
-	if muted {
-		pMoveToEx.Call(dc, uintptr(cx+px(2)), uintptr(cy-px(7)), 0)
-		pLineTo.Call(dc, uintptr(cx+px(10)), uintptr(cy+px(7)))
-	} else {
-		pMoveToEx.Call(dc, uintptr(cx+px(6)), uintptr(cy-px(5)), 0)
-		pLineTo.Call(dc, uintptr(cx+px(10)), uintptr(cy-px(2)))
-		pMoveToEx.Call(dc, uintptr(cx+px(6)), uintptr(cy+px(5)), 0)
-		pLineTo.Call(dc, uintptr(cx+px(10)), uintptr(cy+px(2)))
-	}
-}
-
-func (a *App) cbIconFullscreen(dc uintptr, r RECT) {
-	s := a.cbScale
-	cx := (r.Left + r.Right) / 2
-	cy := (r.Top + r.Bottom) / 2
-	d := int32(7 * s)
-	pSelectObject.Call(dc, a.cbPenIcon)
-	pSelectObject.Call(dc, pGetStockObject2(NULL_BRUSH))
-	corner := func(x, y, dx, dy int32) {
-		pMoveToEx.Call(dc, uintptr(x), uintptr(y), 0)
-		pLineTo.Call(dc, uintptr(x+dx), uintptr(y))
-		pMoveToEx.Call(dc, uintptr(x), uintptr(y), 0)
-		pLineTo.Call(dc, uintptr(x), uintptr(y+dy))
-	}
-	corner(cx-d, cy-d, d/2, d/2)
-	corner(cx+d, cy-d, -d/2, d/2)
-	corner(cx-d, cy+d, d/2, -d/2)
-	corner(cx+d, cy+d, -d/2, -d/2)
-}
-
-func (a *App) cbIconEye(dc uintptr, r RECT) {
-	s := a.cbScale
-	cx := (r.Left + r.Right) / 2
-	cy := (r.Top + r.Bottom) / 2
-	w := int32(9 * s)
-	h := int32(5 * s)
-	pSelectObject.Call(dc, a.cbPenIcon)
-	pSelectObject.Call(dc, pGetStockObject2(NULL_BRUSH))
-	pEllipse.Call(dc, uintptr(cx-w), uintptr(cy-h), uintptr(cx+w), uintptr(cy+h))
-	pSelectObject.Call(dc, a.cbBrIcon)
-	pr := int32(2.2 * s)
-	pEllipse.Call(dc, uintptr(cx-pr), uintptr(cy-pr), uintptr(cx+pr), uintptr(cy+pr))
-	mode := a.settings.VideoMode
-	if mode == "auto" {
-		pSelectObject.Call(dc, a.cbPenMuted)
-		pMoveToEx.Call(dc, uintptr(cx+w-int32(3*s)), uintptr(cy+h-int32(4*s)), 0)
-		pLineTo.Call(dc, uintptr(cx+w+int32(1*s)), uintptr(cy+h-int32(1*s)))
-		pMoveToEx.Call(dc, uintptr(cx+w+int32(1*s)), uintptr(cy+h-int32(4*s)), 0)
-		pLineTo.Call(dc, uintptr(cx+w-int32(3*s)), uintptr(cy+h-int32(1*s)))
-	} else if mode == "hidden" {
-		pSelectObject.Call(dc, a.cbPenAccent)
-		pMoveToEx.Call(dc, uintptr(cx-w), uintptr(cy+h+int32(2*s)), 0)
-		pLineTo.Call(dc, uintptr(cx+w), uintptr(cy-h-int32(2*s)))
-	}
-}
-
-func (a *App) cbIconLayouts(dc uintptr, r RECT) {
-	s := a.cbScale
-	cx := (r.Left + r.Right) / 2
-	cy := (r.Top + r.Bottom) / 2
-	sz := int32(5 * s)
-	gap := int32(2 * s)
-	pSelectObject.Call(dc, pGetStockObject2(NULL_PEN))
-	pSelectObject.Call(dc, a.cbBrIcon)
-	for yy := 0; yy < 2; yy++ {
-		for xx := 0; xx < 2; xx++ {
-			x := cx - sz - gap/2 + int32(xx)*(sz+gap)
-			y := cy - sz - gap/2 + int32(yy)*(sz+gap)
-			pRoundRect.Call(dc, uintptr(x), uintptr(y), uintptr(x+sz), uintptr(y+sz), 2, 2)
-		}
-	}
-}
-
-func (a *App) cbIconPin(dc uintptr, r RECT) {
-	s := a.cbScale
-	cx := (r.Left + r.Right) / 2
-	cy := (r.Top + r.Bottom) / 2
-	pen := a.cbPenIcon
-	col := uintptr(colText)
-	if a.settings.BarOntop {
-		pen = a.cbPenAccent
-		col = colAccent
-	}
-	pSelectObject.Call(dc, pen)
-	pSelectObject.Call(dc, pGetStockObject2(NULL_BRUSH))
-	pEllipse.Call(dc, uintptr(cx-int32(4*s)), uintptr(cy-int32(9*s)),
-		uintptr(cx+int32(4*s)), uintptr(cy-int32(1*s)))
-	pMoveToEx.Call(dc, uintptr(cx), uintptr(cy-int32(1*s)), 0)
-	pLineTo.Call(dc, uintptr(cx), uintptr(cy+int32(8*s)))
-	pMoveToEx.Call(dc, uintptr(cx-int32(5*s)), uintptr(cy+int32(9*s)), 0)
-	pLineTo.Call(dc, uintptr(cx+int32(5*s)), uintptr(cy+int32(9*s)))
-	_ = col
-}
-
-func (a *App) cbIconBrowse(dc uintptr, r RECT) {
-	s := a.cbScale
-	cx := (r.Left + r.Right) / 2
-	cy := (r.Top + r.Bottom) / 2
-	pSelectObject.Call(dc, a.cbPenIcon)
-	pSelectObject.Call(dc, pGetStockObject2(NULL_BRUSH))
-	pRoundRect.Call(dc, uintptr(cx-int32(9*s)), uintptr(cy-int32(6*s)),
-		uintptr(cx+int32(9*s)), uintptr(cy+int32(6*s)),
-		uintptr(int32(4*s)), uintptr(int32(4*s)))
-	pts := []POINT{{cx - int32(2*s), cy - int32(4*s)}, {cx - int32(2*s), cy + int32(4*s)}, {cx + int32(5*s), cy}}
-	pSelectObject.Call(dc, pGetStockObject2(NULL_PEN))
-	pSelectObject.Call(dc, a.cbBrIcon)
-	pPolygon.Call(dc, uintptr(unsafe.Pointer(&pts[0])), 3)
-}
-
-func (a *App) cbIconClose(dc uintptr, r RECT) {
-	s := a.cbScale
-	cx := (r.Left + r.Right) / 2
-	cy := (r.Top + r.Bottom) / 2
-	d := int32(5 * s)
-	pSelectObject.Call(dc, a.cbPenIcon)
-	pMoveToEx.Call(dc, uintptr(cx-d), uintptr(cy-d), 0)
-	pLineTo.Call(dc, uintptr(cx+d), uintptr(cy+d))
-	pMoveToEx.Call(dc, uintptr(cx+d), uintptr(cy-d), 0)
-	pLineTo.Call(dc, uintptr(cx-d), uintptr(cy+d))
-}
-
-func (a *App) cbIconMenu(dc uintptr, r RECT) {
-	s := a.cbScale
-	cx := (r.Left + r.Right) / 2
-	cy := (r.Top + r.Bottom) / 2
-	pSelectObject.Call(dc, pGetStockObject2(NULL_PEN))
-	pSelectObject.Call(dc, a.cbBrIcon)
-	for i := -1; i <= 1; i++ {
-		x := cx + int32(i)*int32(6*s)
-		rr := int32(1.6 * s)
-		pEllipse.Call(dc, uintptr(x-rr), uintptr(cy-rr), uintptr(x+rr), uintptr(cy+rr))
-	}
 }
 
 func clockStr(sec float64) string {

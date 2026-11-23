@@ -15,6 +15,7 @@ var (
 	gdi32    = syscall.NewLazyDLL("gdi32.dll")
 	shell32  = syscall.NewLazyDLL("shell32.dll")
 	shcore   = syscall.NewLazyDLL("shcore.dll")
+	msimg32  = syscall.NewLazyDLL("msimg32.dll")
 )
 
 var (
@@ -103,6 +104,9 @@ var (
 
 	pCreateSolidBrush    = gdi32.NewProc("CreateSolidBrush")
 	pCreatePen           = gdi32.NewProc("CreatePen")
+	pExtCreatePen        = gdi32.NewProc("ExtCreatePen")
+	pPolyline            = gdi32.NewProc("Polyline")
+	pGradientFill        = msimg32.NewProc("GradientFill")
 	pDeleteObject        = gdi32.NewProc("DeleteObject")
 	pSelectObject        = gdi32.NewProc("SelectObject")
 	pSetTextColor        = gdi32.NewProc("SetTextColor")
@@ -133,6 +137,22 @@ var (
 
 	pGetDpiForMonitor = shcore.NewProc("GetDpiForMonitor")
 )
+
+type LOGBRUSH struct {
+	Style uint32
+	Color uint32
+	Hatch uintptr
+}
+
+type TRIVERTEX struct {
+	X, Y                    int32
+	Red, Green, Blue, Alpha uint16
+}
+
+type GRADIENT_RECT struct {
+	UpperLeft  uint32
+	LowerRight uint32
+}
 
 // ---- constants -----------------------------------------------------------
 

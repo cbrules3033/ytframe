@@ -119,19 +119,26 @@ type App struct {
 	cbReady   bool
 	cbScale   float64
 
-	cbFontBody  uintptr
-	cbFontSmall uintptr
-	cbFontTime  uintptr
-	cbBrBg      uintptr
-	cbBrPanel   uintptr
-	cbBrHover   uintptr
-	cbBrAccent  uintptr
-	cbBrIcon    uintptr
-	cbBrMuted   uintptr
-	cbPenBorder uintptr
-	cbPenIcon   uintptr
-	cbPenMuted  uintptr
-	cbPenAccent uintptr
+	cbFontBody   uintptr
+	cbFontLabel  uintptr
+	cbFontSmall  uintptr
+	cbFontTime   uintptr
+	cbBrBg       uintptr
+	cbBrPanel    uintptr
+	cbBrHover    uintptr
+	cbBrPress    uintptr
+	cbBrAccent   uintptr
+	cbBrAccentHi uintptr
+	cbBrAccentLo uintptr
+	cbBrIcon     uintptr
+	cbBrMuted    uintptr
+	cbBrTrack    uintptr
+	cbPenBorder  uintptr
+	cbPenSurface uintptr
+	cbPenDivider uintptr
+	cbPenIcon    uintptr
+	cbPenMuted   uintptr
+	cbPenAccent  uintptr
 
 	cbBackDC  uintptr
 	cbBackBmp uintptr
@@ -144,6 +151,8 @@ type App struct {
 	cbBtn           [cbBtnCount]RECT
 	cbHover         int
 	cbPress         int
+	cbSeekHover     bool
+	cbVolHover      bool
 	cbDrag          bool
 	cbDragStart     POINT
 	cbDragRect      RECT

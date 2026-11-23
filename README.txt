@@ -1,4 +1,4 @@
-YTFrame 1.3.3
+YTFrame 1.3.4
 =============
 
 A borderless, video-only YouTube window with a floating control bar and a
@@ -20,7 +20,9 @@ click "More info" -> "Run anyway".
 CONTROL BAR
 -----------
 A separate window, usable even when the video is tiny. Always on top by
-default (pin toggles it). It never steals keyboard focus.
+default (pin toggles it). It never steals keyboard focus. The 1.3.4 remote
+has a larger card, a dedicated timeline, a large play button and consistent
+rounded icons.
 
   seek line          click or drag to seek
   play / pause

@@ -14,6 +14,8 @@ Paste a link or browse YouTube, click a video, and it plays in a window that is 
 
 **1.3.3 fix:** the YouTube page no longer stays blank white when Browse first opens or when a retained browser window is shown again. WebView2 is created in an already-visible container, hidden with the host, and re-shown with an explicit visibility/resize repaint.
 
+**1.3.4:** the remote has been redesigned around a larger 640×168 card: a clearer title row, softer surfaces, a proper timeline with a live scrub handle, a large play/pause control, and consistent rounded-line icons for skip, volume, fullscreen, video mode, layouts and pin.
+
 ![The paste bar](docs/bar.png)
 
 ![The floating control bar](docs/controlbar.png)
