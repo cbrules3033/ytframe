@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strconv"
 	"testing"
+	"time"
 	"unsafe"
 )
 
@@ -37,6 +38,26 @@ func TestLoadAtTimestampUsesCurrentMPVProtocol(t *testing.T) {
 		if p.snapshot().HasDuration || p.snapshot().Duration != 0 || p.eofPosted {
 			t.Fatal("previous video's duration/EOF leaked into new load")
 		}
+	}
+}
+
+func TestDuplicateBrowserNavigationDoesNotRestartLoad(t *testing.T) {
+	previous := dataDirPath
+	dataDirPath = t.TempDir()
+	defer func() { dataDirPath = previous }()
+	u := "https://www.youtube.com/watch?v=abcdefghijk"
+	s := defaultSettings()
+	s.BarVisible = false
+	a := &App{
+		settings:     s,
+		loading:      true,
+		loadingURL:   u,
+		lastStartKey: videoKey(u),
+		lastStartAt:  time.Now(),
+	}
+	a.startPlayback(u, true)
+	if !a.loading || a.loadingURL != u {
+		t.Fatal("a duplicate navigation event restarted or canceled the active load")
 	}
 }
 

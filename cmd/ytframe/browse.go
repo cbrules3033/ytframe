@@ -42,6 +42,7 @@ type browseWindow struct {
 	w         webview2.WebView
 	failed    bool
 	hidden    bool
+	closing   bool
 
 	scale   float64
 	title   string
@@ -100,8 +101,7 @@ func runBrowse() {
 	browseMutex = h
 	if errno, ok := lastErr.(syscall.Errno); ok && errno == ERROR_ALREADY_EXISTS {
 		if target, _, _ := pFindWindowW.Call(uintptr(unsafe.Pointer(u16(browseClass))), 0); target != 0 {
-			pShowWindow.Call(target, SW_RESTORE)
-			pSetForegroundWindow.Call(target)
+			pPostMessageW.Call(target, WM_APP_BROWSESHOW, 0, 0)
 		}
 		return
 	}
@@ -178,6 +178,35 @@ func runBrowse() {
 	} else {
 		bw.runLoop()
 	}
+}
+
+// hideBrowse keeps the WebView2 process and page alive. Reopening Browse only
+// shows this window again; it does not create a new browser or navigate home.
+func (bw *browseWindow) hideBrowse() {
+	if bw == nil || bw.hwnd == 0 {
+		return
+	}
+	bw.saveRect()
+	if bw.w != nil {
+		bw.w.Eval("document.querySelectorAll('video,audio').forEach(function(v){v.pause()})")
+	}
+	bw.hidden = true
+	pShowWindow.Call(bw.hwnd, SW_HIDE)
+	if target, _, _ := pFindWindowW.Call(uintptr(unsafe.Pointer(u16("YTFrameHelper"))), 0); target != 0 {
+		sendCopyDataKind(target, 3, "hidden")
+	}
+	logf("browse: hidden, session retained")
+}
+
+// closeBrowse destroys the retained browser process. This is only used for an
+// explicit Close command, clearing data, or quitting YTFrame. The title-bar X,
+// Alt+F4 and the taskbar close button all hide instead, so the page survives.
+func (bw *browseWindow) closeBrowse() {
+	if bw == nil || bw.hwnd == 0 {
+		return
+	}
+	bw.closing = true
+	pPostMessageW.Call(bw.hwnd, WM_CLOSE, 0, 0)
 }
 
 func (bw *browseWindow) runLoop() {
@@ -567,26 +596,20 @@ func browseWndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 	case WM_APP_BROWSESHOW:
 		bw.hidden = false
 		pShowWindow.Call(hwnd, SW_RESTORE)
-		if bw.w != nil {
-			bw.w.SetVisible(true)
-		}
+		bw.layout()
+		bw.invalidate()
 		pSetForegroundWindow.Call(hwnd)
+		logf("browse: session shown")
 		return 0
 	case WM_APP_BROWSEHIDE:
 		if bw.failed {
-			pPostMessageW.Call(hwnd, WM_CLOSE, 0, 0)
+			bw.closeBrowse()
 			return 0
 		}
-		bw.saveRect()
-		if bw.w != nil {
-			bw.w.Eval("document.querySelectorAll('video,audio').forEach(function(v){v.pause()})")
-			bw.w.SetVisible(false)
-		}
-		bw.hidden = true
-		pShowWindow.Call(hwnd, SW_HIDE)
-		if target, _, _ := pFindWindowW.Call(uintptr(unsafe.Pointer(u16("YTFrameHelper"))), 0); target != 0 {
-			sendCopyDataKind(target, 3, "hidden")
-		}
+		bw.hideBrowse()
+		return 0
+	case WM_APP_BROWSECLOSE:
+		bw.closeBrowse()
 		return 0
 	case WM_CREATE:
 		bw.hwnd = hwnd
@@ -751,6 +774,10 @@ func browseWndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 		mm.MinTrackSize = POINT{X: int32(640 * bw.scale), Y: int32(480 * bw.scale)}
 		return 0
 	case WM_CLOSE:
+		if !bw.closing && !bw.failed {
+			bw.hideBrowse()
+			return 0
+		}
 		bw.saveRect()
 		pDestroyWindow.Call(hwnd)
 		return 0
@@ -797,6 +824,7 @@ func browsePlay(u string) {
 	if youtubeID(u) == "" {
 		return
 	}
+	logf("browse: video selected %s", u)
 	target, _, _ := pFindWindowW.Call(uintptr(unsafe.Pointer(u16("YTFrameHelper"))), 0)
 	if target != 0 {
 		var pid uint32
@@ -833,10 +861,21 @@ const browseInitJS = `
   if (window.__ytframeInit) return;
   window.__ytframeInit = true;
 
-  var lastURL="", lastAt=0, lastTitle="";
+  var lastKey="", lastTitle="";
+  function key(u) {
+    try {
+      var x = new URL(u, location.href);
+      var v = x.searchParams.get('v');
+      if (/^\/watch$/.test(x.pathname) && v) return 'v:' + v;
+      var m = x.pathname.match(/^\/shorts\/([^\/?#]+)/);
+      if (m) return 's:' + m[1];
+      return u;
+    } catch (e) { return u; }
+  }
   function send(u) {
-    if (u===lastURL && Date.now()-lastAt<1500) return;
-    lastURL=u;lastAt=Date.now();
+    var k = key(u);
+    if (k === lastKey) return;
+    lastKey = k;
     try { window.ytframePlay(u); } catch (e) {}
   }
   function title() {
@@ -862,6 +901,10 @@ const browseInitJS = `
     try {
       if ((location.pathname === '/watch' && new URLSearchParams(location.search).get('v')) || location.pathname.indexOf('/shorts/') === 0) {
         send(location.href);
+      } else {
+        // Leaving a video resets the guard, so choosing the same video again
+        // later still opens it.
+        lastKey = "";
       }
     } catch (e) {}
     title();
@@ -881,7 +924,11 @@ const browseInitJS = `
 `
 
 func (a *App) openBrowse() {
+	// Have mpv ready while the user picks a video, so a click only has to wait
+	// for YouTube's resolver, not for a cold player process.
+	a.warmPlayer()
 	if target, _, _ := pFindWindowW.Call(uintptr(unsafe.Pointer(u16(browseClass))), 0); target != 0 {
+		logf("browse: reusing retained session")
 		pPostMessageW.Call(target, WM_APP_BROWSESHOW, 0, 0)
 		a.browseOpen = true
 		return
@@ -919,8 +966,20 @@ func (a *App) onBrowseExit() {
 	a.browseOpen = false
 	a.browseCmd = nil
 	a.browsePid = 0
-	if a.settings.BarVisible {
+	if !a.quitting && a.settings.BarVisible {
 		a.showControlBar()
+	}
+}
+
+func browseWindowExists() bool {
+	hwnd, _, _ := pFindWindowW.Call(uintptr(unsafe.Pointer(u16(browseClass))), 0)
+	return hwnd != 0
+}
+
+// closeBrowse releases the retained WebView2 session on an explicit quit/close.
+func (a *App) closeBrowse() {
+	if hwnd, _, _ := pFindWindowW.Call(uintptr(unsafe.Pointer(u16(browseClass))), 0); hwnd != 0 {
+		pPostMessageW.Call(hwnd, WM_APP_BROWSECLOSE, 0, 0)
 	}
 }
 
@@ -929,9 +988,12 @@ func (a *App) clearBrowseData() {
 		"Clear YouTube browsing data", MB_YESNO|MB_ICONQUESTION) != IDYES {
 		return
 	}
-	if target, _, _ := pFindWindowW.Call(uintptr(unsafe.Pointer(u16(browseClass))), 0); target != 0 {
-		pPostMessageW.Call(target, WM_CLOSE, 0, 0)
-		time.Sleep(600 * time.Millisecond)
+	a.closeBrowse()
+	for i := 0; i < 30; i++ {
+		if hwnd, _, _ := pFindWindowW.Call(uintptr(unsafe.Pointer(u16(browseClass))), 0); hwnd == 0 {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 	dir := filepath.Join(dataDirPath, "browse-data")
 	var err error

@@ -1,4 +1,4 @@
-YTFrame 1.3.0
+YTFrame 1.3.1
 =============
 
 A borderless, video-only YouTube window with a floating control bar and a
@@ -67,8 +67,8 @@ YOUTUBE BROWSER
 Tray -> Browse YouTube, or the bars Browse button. A borderless window with
 a dark toolbar and the real YouTube site. Clicking a video sends it to the
 player and hides the browser. The loaded page is kept for fast reopening.
-The X also hides it; the remote menu's Close YouTube browser frees the session.
-Quitting YTFrame closes it completely.
+The X, Alt+F4 and the taskbar close button all hide it; the remote menu's
+Close YouTube browser frees the session. Quitting YTFrame closes it completely.
 
 Needs the Microsoft Edge WebView2 Runtime, which normally comes with Edge on
 Windows 10/11. If it is missing, the browser window has a Get WebView2 button;

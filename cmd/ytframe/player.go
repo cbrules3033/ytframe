@@ -780,6 +780,9 @@ func (p *Player) stop() {
 	p.url, p.title = "", ""
 	p.duration, p.pos = 0, 0
 	p.hasDuration, p.loadNotified, p.firstFrame = false, false, false
+	// force-window=no may destroy mpv's window. Forget the old handle so the
+	// next load discovers the new one instead of controlling a dead HWND.
+	p.hwnd = 0
 	p.mu.Unlock()
 	p.command("stop")
 	p.command("set_property", "force-window", "no")

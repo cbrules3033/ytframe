@@ -13,6 +13,10 @@ import (
 const (
 	cbW = 600
 	cbH = 152
+
+	// A no-activate popup still receives clicks, but returning this explicitly
+	// prevents Windows from consuming the first click in the activation policy.
+	maNoActivate = 3
 )
 
 const (
@@ -354,6 +358,8 @@ func cbWndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 		return 0
 	case WM_ERASEBKGND:
 		return 1
+	case WM_MOUSEACTIVATE:
+		return maNoActivate
 	case WM_MOUSEMOVE:
 		x, y := mouseX(lparam), mouseY(lparam)
 		if a.cbDrag {
@@ -407,8 +413,15 @@ func cbWndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 			return 0
 		}
 		if b := a.cbHitButton(x, y); b >= 0 {
+			// Act on press rather than release. The bar is a no-activate
+			// popup, and capture can be cancelled before the mouse-up arrives
+			// on some Windows configurations; that used to swallow play/browse.
 			a.cbPress = b
-			pSetCapture.Call(hwnd)
+			a.cbInvalidate()
+			if a.cbEnabled(b) {
+				a.cbAction(b)
+			}
+			a.cbPress = -1
 			a.cbInvalidate()
 			return 0
 		}
@@ -533,7 +546,23 @@ func (a *App) cbAction(b int) {
 			return
 		}
 		if p != nil {
-			p.togglePause()
+			// Use the state shown on the bar rather than toggling blindly: a
+			// missed event can leave mpv and the icon one step apart, and then
+			// "play" only paused an already-paused video.
+			resuming := a.cbLastPause
+			logf("bar play: resuming=%v", resuming)
+			p.pauseSet(!resuming)
+			a.cbLastPause = !resuming
+			if resuming {
+				a.playRequestedAt = time.Now()
+				if a.settings.VideoMode != "hidden" {
+					a.showVideoWindow()
+				}
+				a.setBarStatus("Playing")
+			} else {
+				a.playRequestedAt = time.Time{}
+				a.setBarStatus("Paused")
+			}
 		}
 	case cbBtnBack:
 		if p != nil {
@@ -597,11 +626,11 @@ func (a *App) cbTick() {
 	if !a.cbVisible || a.cbHwnd == 0 {
 		return
 	}
-	pause := a.cbLastPause
 	changed := a.cbReadState()
-	if pause != a.cbLastPause {
-		a.applyVideoVisibility()
-	}
+	// Reconcile on every tick, not only when the pause bit flips. A missed
+	// transition or a stale cached visibility flag should not leave playback
+	// running behind an invisible window.
+	a.applyVideoVisibility()
 	if a.cbStatus != "" && time.Now().After(a.cbStatusUntil) {
 		a.cbStatus = ""
 		changed = true
@@ -1085,26 +1114,61 @@ func (a *App) applyVideoVisibility() {
 		case "visible":
 			hide = false
 		default:
-			hide = st.Pause && !st.Eof && a.cbVisible && !a.barVisible && !a.eofShown
+			hide = st.Pause && !st.Eof && a.cbVisible && !a.barVisible && !a.eofShown &&
+				time.Since(a.playRequestedAt) > 1500*time.Millisecond
 		}
 	}
-	if hide == a.videoHidden {
-		return
-	}
+	visible, _, _ := pIsWindowVisible.Call(hwnd)
+	iconic, _, _ := pIsIconic.Call(hwnd)
 	if hide {
+		if a.videoHidden {
+			return
+		}
 		pShowWindow.Call(hwnd, SW_HIDE)
 		pSetWindowPos.Call(hwnd, 0, 0, 0, 0, 0,
 			SWP_HIDEWINDOW|SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE)
 		a.videoHidden = true
 		logf("video hidden")
-	} else {
-		pSetWindowPos.Call(hwnd, 0, 0, 0, 0, 0,
-			SWP_SHOWWINDOW|SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE)
-		pShowWindow.Call(hwnd, SW_SHOW)
-		a.videoHidden = false
-		pSetForegroundWindow.Call(hwnd)
-		logf("video shown")
+		return
 	}
+	if visible != 0 && !a.videoHidden {
+		// Minimized by the user counts as visible; do not fight them by
+		// restoring it every timer tick.
+		return
+	}
+	pSetWindowPos.Call(hwnd, 0, 0, 0, 0, 0,
+		SWP_SHOWWINDOW|SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE)
+	if iconic != 0 {
+		pShowWindow.Call(hwnd, SW_RESTORE)
+	} else {
+		pShowWindow.Call(hwnd, SW_SHOW)
+	}
+	a.videoHidden = false
+	pSetForegroundWindow.Call(hwnd)
+	logf("video shown")
+}
+
+// showVideoWindow makes the picture visible immediately after a resume click,
+// without waiting for the next mpv property event.
+func (a *App) showVideoWindow() {
+	p := a.player
+	if p == nil || !p.isRunning() {
+		return
+	}
+	hwnd := p.hwndNow()
+	if hwnd == 0 {
+		return
+	}
+	pSetWindowPos.Call(hwnd, 0, 0, 0, 0, 0,
+		SWP_SHOWWINDOW|SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE)
+	if iconic, _, _ := pIsIconic.Call(hwnd); iconic != 0 {
+		pShowWindow.Call(hwnd, SW_RESTORE)
+	} else {
+		pShowWindow.Call(hwnd, SW_SHOW)
+	}
+	a.videoHidden = false
+	pSetForegroundWindow.Call(hwnd)
+	logf("video shown (bar play)")
 }
 
 // ---- layouts -------------------------------------------------------------
@@ -1381,7 +1445,7 @@ func (a *App) cbShowMenu() {
 	}
 	add(flags, 115, "In-video controls")
 	add(MF_STRING, 140, "Browse YouTube…")
-	if a.browseCmd != nil {
+	if a.browseCmd != nil || browseWindowExists() {
 		add(MF_STRING, 142, "Close YouTube browser")
 	}
 	add(MF_STRING, 112, "Hide control bar")

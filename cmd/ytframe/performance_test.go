@@ -334,6 +334,32 @@ func TestBrowserHideAndShowReuseItsWindow(t *testing.T) {
 	}
 }
 
+func TestBrowserWindowCloseKeepsRetainedSession(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	previous := bw
+	defer func() { bw = previous }()
+	bw = &browseWindow{scale: 1, hover: -1, press: -1}
+	bw.ensureGDI()
+	bw.createHost()
+	if bw.hwnd == 0 {
+		t.Fatal("browser host was not created")
+	}
+	hwnd := bw.hwnd
+	pShowWindow.Call(hwnd, SW_SHOW)
+	// The title-bar X/taskbar close arrives as WM_CLOSE; it must hide and keep
+	// the process for fast reopening, not destroy the WebView2 session.
+	browseWndProc(hwnd, WM_CLOSE, 0, 0)
+	if !bw.hidden || bw.closing {
+		t.Fatal("WM_CLOSE destroyed instead of hiding the retained browser")
+	}
+	if alive, _, _ := pIsWindow.Call(hwnd); alive == 0 {
+		t.Fatal("browser window was destroyed on close")
+	}
+	bw.closing = true
+	browseWndProc(hwnd, WM_CLOSE, 0, 0)
+}
+
 func TestFinishedVideoRemainsRecentWithoutResuming(t *testing.T) {
 	previous := dataDirPath
 	dataDirPath = t.TempDir()

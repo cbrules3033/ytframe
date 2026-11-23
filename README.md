@@ -8,6 +8,8 @@ Paste a link or browse YouTube, click a video, and it plays in a window that is 
 
 **New in 1.3:** a launcher with recent videos and a visible **Show controls** action; a larger, clearer remote available before playback; cancelable loading; a warmed player; a faster unpacked video resolver; and a reusable YouTube browser. Playback IPC now uses asynchronous Windows pipes so idle reads cannot stall control commands. [Measured performance and test details](docs/PERFORMANCE.md).
 
+**1.3.1 fixes:** closing the browser window keeps the loaded YouTube session for instant reopening; YouTube's duplicate navigation event no longer restarts a click that is already loading; and the remote's play button now resumes and reveals the hidden picture reliably.
+
 ![The paste bar](docs/bar.png)
 
 ![The floating control bar](docs/controlbar.png)
@@ -93,7 +95,7 @@ Five slots, each storing the video window rect and the control-bar position.
 
 ## YouTube browser
 
-Tray → **Browse YouTube…** opens a borderless custom window with a 52px dark toolbar and the real YouTube site below it. Clicking a video (or Shorts) sends it to the player and hides the browser. The control bar stays available. Closing the browser with its **×** also hides it and retains the loaded page for fast reopening; the remote menu’s **Close YouTube browser** frees the session. Quitting YTFrame closes it completely. Hidden browser media is paused and WebView2 page visibility is set to hidden.
+Tray → **Browse YouTube…** opens a borderless custom window with a 52px dark toolbar and the real YouTube site below it. Clicking a video (or Shorts) sends it to the player and hides the browser. The control bar stays available. Closing the browser with its **×**, **Alt+F4** or the taskbar close button hides it and retains the loaded page for instant reopening; the remote menu’s **Close YouTube browser** frees the session. Quitting YTFrame closes it completely. Hidden browser media is paused, but the page itself stays in memory.
 
 - Back/forward/reload/home buttons; `Alt+←/→` and `Alt+Home` also work.
 - The browse profile is stored in `browse-data/` next to the exe, so logins and cookies survive restarts. Tray → **Clear YouTube browsing data** removes it.

@@ -59,6 +59,9 @@ type App struct {
 	loadingStart      int
 	loadedAt          time.Time
 	loadRequested     time.Time
+	lastStartKey      string
+	lastStartAt       time.Time
+	playRequestedAt   time.Time
 	lastTrayTitle     string
 
 	status    string
@@ -666,9 +669,7 @@ func (a *App) onMenuCommand(id int) {
 	case id == 141:
 		a.clearBrowseData()
 	case id == 142:
-		if hwnd, _, _ := pFindWindowW.Call(uintptr(unsafe.Pointer(u16(browseClass))), 0); hwnd != 0 {
-			pPostMessageW.Call(hwnd, WM_CLOSE, 0, 0)
-		}
+		a.closeBrowse()
 	case id >= 200 && id <= 203:
 		q := "best"
 		switch id {
@@ -843,6 +844,27 @@ func (a *App) startPlayback(raw string, showBarIfError bool) {
 		a.showBarWith(raw, errMsg, true)
 		return
 	}
+	// A browser click can also trigger YouTube's own navigation event. The
+	// same video then arrives twice, and the second load used to restart a
+	// resolver request that was already seconds into its work.
+	key := videoKey(u)
+	if key != "" && key == a.lastStartKey {
+		if a.loading && time.Since(a.lastStartAt) < 20*time.Second {
+			logf("ignoring duplicate load while %s is opening", key)
+			if a.settings.BarVisible {
+				a.showControlBar()
+			}
+			return
+		}
+		if !a.eofShown && time.Since(a.loadedAt) < 4*time.Second {
+			logf("ignoring duplicate load just after %s opened", key)
+			if a.settings.BarVisible {
+				a.showControlBar()
+			}
+			return
+		}
+	}
+	a.lastStartKey, a.lastStartAt = key, time.Now()
 	a.saveCurrentPos()
 	start := a.resumeFor(u, ts)
 	a.loading, a.loadRestarted = true, false
@@ -1332,9 +1354,7 @@ func (a *App) requestExit() {
 		a.player = nil
 	}
 	a.removeTray()
-	if h, _, _ := pFindWindowW.Call(uintptr(unsafe.Pointer(u16("YTFrameBrowseHost"))), 0); h != 0 {
-		pPostMessageW.Call(h, WM_CLOSE, 0, 0)
-	}
+	a.closeBrowse()
 	for hk := uintptr(HK_PASTE); hk <= HK_LAST; hk++ {
 		pUnregisterHotKey.Call(helperHwnd, hk)
 	}
@@ -1361,6 +1381,7 @@ func (a *App) cleanup() {
 		a.player.quitAndWait(2 * time.Second)
 		a.player = nil
 	}
+	a.closeBrowse()
 	a.removeTray()
 	a.freeGDI()
 }

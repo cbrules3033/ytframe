@@ -4,8 +4,8 @@
 1 24 "app.manifest"
 
 1 VERSIONINFO
-FILEVERSION     1,3,0,0
-PRODUCTVERSION  1,3,0,0
+FILEVERSION     1,3,1,0
+PRODUCTVERSION  1,3,1,0
 FILEOS          0x40004L
 FILETYPE        0x1L
 BEGIN
@@ -15,12 +15,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "cbrules3033"
             VALUE "FileDescription",  "YTFrame - borderless video player"
-            VALUE "FileVersion",      "1.3.0"
+            VALUE "FileVersion",      "1.3.1"
             VALUE "InternalName",     "YTFrame"
             VALUE "LegalCopyright",   "MIT License"
             VALUE "OriginalFilename", "YTFrame.exe"
             VALUE "ProductName",      "YTFrame"
-            VALUE "ProductVersion",   "1.3.0"
+            VALUE "ProductVersion",   "1.3.1"
         END
     END
     BLOCK "VarFileInfo"

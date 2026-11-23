@@ -34,6 +34,6 @@ For desktop investigation, `ytframe.log` records request-to-loaded, process-to-I
 
 ## Tradeoffs
 
-Keeping the idle player and an already opened browser session uses additional memory. The player performs no network request until a link is submitted. Browser media is paused and the WebView2 controller is hidden when the browser is hidden. The remote menu's **Close YouTube browser** releases that session, and quitting YTFrame ends both processes.
+Keeping the idle player and an already opened browser session uses additional memory. The player performs no network request until a link is submitted. Browser media is paused and the host window is hidden, while the WebView2 page stays alive so reopening Browse is instant. The remote menu's **Close YouTube browser** releases that session, and quitting YTFrame ends both processes.
 
 Updates install the verified resolver into a versioned directory, then atomically switch a small manifest. Loaded executables and DLLs are not overwritten. Older resolver versions remain in the app's data directory; deleting an unused old version is optional. Legacy portable folders with a root-level `yt-dlp.exe` remain supported as a fallback.
