@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const appVersion = "1.3.4"
+const appVersion = "1.3.5"
 
 const layoutSlots = 5
 

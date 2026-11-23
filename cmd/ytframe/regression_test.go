@@ -61,6 +61,18 @@ func TestDuplicateBrowserNavigationDoesNotRestartLoad(t *testing.T) {
 	}
 }
 
+func TestControlBarDownsampleAveragesPixels(t *testing.T) {
+	src := []byte{
+		0, 0, 0, 255, 10, 20, 30, 255,
+		40, 50, 60, 255, 70, 80, 90, 255,
+	}
+	dst := make([]byte, 4)
+	cbDownsample(unsafe.Pointer(&dst[0]), unsafe.Pointer(&src[0]), 2, 2, 1, 1, 2)
+	if dst[0] != 30 || dst[1] != 37 || dst[2] != 45 || dst[3] != 255 {
+		t.Fatalf("box filter produced %v", dst)
+	}
+}
+
 func TestSwitchingVideoKeepsPlayerWindowRect(t *testing.T) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()

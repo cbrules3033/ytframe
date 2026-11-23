@@ -130,7 +130,6 @@ var (
 	pCreateBitmap        = gdi32.NewProc("CreateBitmap")
 	pCreateIconIndirect  = user32.NewProc("CreateIconIndirect")
 	pGetDeviceCaps       = gdi32.NewProc("GetDeviceCaps")
-	pSetStretchBltMode   = gdi32.NewProc("SetStretchBltMode")
 
 	pShellNotifyIconW = shell32.NewProc("Shell_NotifyIconW")
 	pShellExecuteW    = shell32.NewProc("ShellExecuteW")
@@ -270,16 +269,17 @@ const (
 	DT_WORDBREAK    = 0x0010
 	DT_NOPREFIX     = 0x0800
 
-	PS_SOLID          = 0
-	NULL_BRUSH        = 5
-	NULL_PEN          = 8
-	TRANSPARENT       = 1
-	CLEARTYPE_QUALITY = 5
-	DEFAULT_CHARSET   = 1
-	FW_NORMAL         = 400
-	FW_SEMIBOLD       = 600
-	DEFAULT_PITCH     = 0
-	FF_DONTCARE       = 0
+	PS_SOLID            = 0
+	NULL_BRUSH          = 5
+	NULL_PEN            = 8
+	TRANSPARENT         = 1
+	CLEARTYPE_QUALITY   = 5
+	ANTIALIASED_QUALITY = 4
+	DEFAULT_CHARSET     = 1
+	FW_NORMAL           = 400
+	FW_SEMIBOLD         = 600
+	DEFAULT_PITCH       = 0
+	FF_DONTCARE         = 0
 
 	SRCCOPY = 0x00CC0020
 

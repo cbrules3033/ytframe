@@ -16,6 +16,8 @@ Paste a link or browse YouTube, click a video, and it plays in a window that is 
 
 **1.3.4:** the remote has been redesigned around a larger 640×168 card: a clearer title row, softer surfaces, a proper timeline with a live scrub handle, a large play/pause control, and consistent rounded-line icons for skip, volume, fullscreen, video mode, layouts and pin.
 
+**1.3.5:** the remote and its icons are rendered at 6× logical resolution and box-filtered down with a native-resolution text pass, so curves and diagonals are properly antialiased instead of pixelated.
+
 ![The paste bar](docs/bar.png)
 
 ![The floating control bar](docs/controlbar.png)

@@ -114,10 +114,12 @@ type App struct {
 	updating     bool
 	pollCount    int
 
-	cbHwnd    uintptr
-	cbVisible bool
-	cbReady   bool
-	cbScale   float64
+	cbHwnd      uintptr
+	cbVisible   bool
+	cbReady     bool
+	cbScale     float64
+	cbSuper     int
+	cbDrawScale float64
 
 	cbFontBody   uintptr
 	cbFontLabel  uintptr
@@ -140,10 +142,14 @@ type App struct {
 	cbPenMuted   uintptr
 	cbPenAccent  uintptr
 
-	cbBackDC  uintptr
-	cbBackBmp uintptr
-	cbBackW   int32
-	cbBackH   int32
+	cbBackDC    uintptr
+	cbBackBmp   uintptr
+	cbBackBits  unsafe.Pointer
+	cbFinalDC   uintptr
+	cbFinalBmp  uintptr
+	cbFinalBits unsafe.Pointer
+	cbBackW     int32
+	cbBackH     int32
 
 	cbSeekRect      RECT
 	cbTimeRect      RECT

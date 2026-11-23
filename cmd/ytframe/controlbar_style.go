@@ -89,6 +89,49 @@ func cbDrawArc(dc uintptr, cx, cy, r float64, startDeg, endDeg float64, pen uint
 	cbPolyline(dc, cbArcPoints(cx, cy, r, startDeg, endDeg), pen)
 }
 
+func cbCreateDIB(dc uintptr, w, h int32) (uintptr, unsafe.Pointer) {
+	var bi BITMAPINFO
+	bi.BmiHeader.BiSize = uint32(unsafe.Sizeof(bi.BmiHeader))
+	bi.BmiHeader.BiWidth = w
+	bi.BmiHeader.BiHeight = -h // top-down
+	bi.BmiHeader.BiPlanes = 1
+	bi.BmiHeader.BiBitCount = 32
+	var bits unsafe.Pointer
+	bmp, _, _ := pCreateDIBSection.Call(dc, uintptr(unsafe.Pointer(&bi)),
+		DIB_RGB_COLORS, uintptr(unsafe.Pointer(&bits)), 0, 0)
+	return bmp, bits
+}
+
+// cbDownsample box-filters the supersampled card into the native-size buffer.
+// This is deterministic and avoids relying on StretchBlt's HALFTONE support.
+func cbDownsample(dst, src unsafe.Pointer, sw, sh, dw, dh int32, ss int32) {
+	if dst == nil || src == nil || ss < 1 || dw <= 0 || dh <= 0 {
+		return
+	}
+	n := int32(ss * ss)
+	s := unsafe.Slice((*byte)(src), int(sw*sh*4))
+	d := unsafe.Slice((*byte)(dst), int(dw*dh*4))
+	for y := int32(0); y < dh; y++ {
+		for x := int32(0); x < dw; x++ {
+			var sb, sg, sr uint32
+			for yy := int32(0); yy < ss; yy++ {
+				row := ((y*ss + yy) * sw) * 4
+				for xx := int32(0); xx < ss; xx++ {
+					i := row + (x*ss+xx)*4
+					sb += uint32(s[i])
+					sg += uint32(s[i+1])
+					sr += uint32(s[i+2])
+				}
+			}
+			o := (y*dw + x) * 4
+			d[o] = byte(sb / uint32(n))
+			d[o+1] = byte(sg / uint32(n))
+			d[o+2] = byte(sr / uint32(n))
+			d[o+3] = 255
+		}
+	}
+}
+
 func (a *App) cbPaint(hdc uintptr) {
 	a.cbPaintCount++
 	var rc RECT
@@ -97,23 +140,53 @@ func (a *App) cbPaint(hdc uintptr) {
 	if w <= 0 || h <= 0 {
 		return
 	}
-	if a.cbBackDC == 0 || a.cbBackW != w || a.cbBackH != h {
+	ss := a.cbSuper
+	if ss < 1 {
+		ss = 1
+	}
+	dw, dh := w*int32(ss), h*int32(ss)
+	if a.cbBackDC == 0 || a.cbBackW != dw || a.cbBackH != dh || a.cbFinalDC == 0 {
 		if a.cbBackDC != 0 {
 			pDeleteDC.Call(a.cbBackDC)
+			a.cbBackDC = 0
 		}
 		if a.cbBackBmp != 0 {
 			pDeleteObject.Call(a.cbBackBmp)
+			a.cbBackBmp = 0
+		}
+		if a.cbFinalDC != 0 {
+			pDeleteDC.Call(a.cbFinalDC)
+			a.cbFinalDC = 0
+		}
+		if a.cbFinalBmp != 0 {
+			pDeleteObject.Call(a.cbFinalBmp)
+			a.cbFinalBmp = 0
 		}
 		a.cbBackDC, _, _ = pCreateCompatibleDC.Call(hdc)
-		a.cbBackBmp, _, _ = pCreateCompatibleBmp.Call(hdc, uintptr(w), uintptr(h))
-		a.cbBackW, a.cbBackH = w, h
-		pSelectObject.Call(a.cbBackDC, a.cbBackBmp)
+		a.cbBackBmp, a.cbBackBits = cbCreateDIB(hdc, dw, dh)
+		if a.cbBackDC != 0 && a.cbBackBmp != 0 {
+			pSelectObject.Call(a.cbBackDC, a.cbBackBmp)
+		}
+		a.cbFinalDC, _, _ = pCreateCompatibleDC.Call(hdc)
+		a.cbFinalBmp, a.cbFinalBits = cbCreateDIB(hdc, w, h)
+		if a.cbFinalDC != 0 && a.cbFinalBmp != 0 {
+			pSelectObject.Call(a.cbFinalDC, a.cbFinalBmp)
+		}
+		a.cbBackW, a.cbBackH = dw, dh
 	}
 	dc := a.cbBackDC
-	if dc == 0 {
+	if dc == 0 || a.cbBackBits == nil || a.cbFinalDC == 0 || a.cbFinalBits == nil {
 		return
 	}
-	s := a.cbScale
+
+	// Draw the whole card at supersampled resolution, then box-filter it down
+	// to native pixels. The geometry stays in logical units; only the scale
+	// and the cached rects change for this paint.
+	oldScale := a.cbScale
+	oldSeek, oldTime, oldVol, oldBtn := a.cbSeekRect, a.cbTimeRect, a.cbVolRect, a.cbBtn
+	a.cbScale = a.cbDrawScale
+	a.cbSeekRect, a.cbTimeRect, a.cbVolRect, a.cbBtn = cbLayoutAt(a.cbDrawScale)
+	s := a.cbDrawScale
 	px := func(v float64) int32 { return int32(math.Round(v * s)) }
 	R := func(x, y, ww, hh float64) RECT {
 		return RECT{Left: px(x), Top: px(y), Right: px(x + ww), Bottom: px(y + hh)}
@@ -121,20 +194,20 @@ func (a *App) cbPaint(hdc uintptr) {
 
 	// Clear first: an unavailable/failed gradient must never leave the previous
 	// frame's text on the backbuffer.
-	fillRect(dc, rc, a.cbBrBg)
+	fillRect(dc, RECT{Left: 0, Top: 0, Right: dw, Bottom: dh}, a.cbBrBg)
 	// A soft vertical gradient clipped by the rounded window region.
 	if pGradientFill.Find() == nil {
 		verts := [2]TRIVERTEX{
 			{X: 0, Y: 0, Red: 0x1B00, Green: 0x2000, Blue: 0x2800, Alpha: 0xFFFF},
-			{X: 0, Y: h, Red: 0x0F00, Green: 0x1100, Blue: 0x1600, Alpha: 0xFFFF},
+			{X: 0, Y: dh, Red: 0x0F00, Green: 0x1100, Blue: 0x1600, Alpha: 0xFFFF},
 		}
 		gr := GRADIENT_RECT{UpperLeft: 0, LowerRight: 1}
 		pGradientFill.Call(dc, uintptr(unsafe.Pointer(&verts[0])), 2,
 			uintptr(unsafe.Pointer(&gr)), 1, gradientFillRectV)
 	}
-	cbRound(dc, RECT{Left: 0, Top: 0, Right: w, Bottom: h},
+	cbRound(dc, RECT{Left: 0, Top: 0, Right: dw, Bottom: dh},
 		px(20), pGetStockObject2(NULL_BRUSH), a.cbPenBorder)
-	cbLine(dc, px(24), px(1), w-px(24), px(1), a.cbPenSurface)
+	cbLine(dc, px(24), px(1), dw-px(24), px(1), a.cbPenSurface)
 
 	// A small brand tile makes the title row feel intentional.
 	brand := R(18, 14, 22, 22)
@@ -149,7 +222,36 @@ func (a *App) cbPaint(hdc uintptr) {
 	pSelectObject.Call(dc, a.cbBrBg)
 	pPolygon.Call(dc, uintptr(unsafe.Pointer(&play[0])), 3)
 
+	a.cbDrawTopPill(dc, cbBtnOpen, a.cbBtn[cbBtnOpen], 0)
+	a.cbDrawTopPill(dc, cbBtnBrowse, a.cbBtn[cbBtnBrowse], 1)
+	a.cbDrawIconButton(dc, cbBtnMenu, a.cbBtn[cbBtnMenu], func() {
+		a.cbDrawMenuIcon(dc, a.cbBtn[cbBtnMenu])
+	})
+	a.cbDrawIconButton(dc, cbBtnHide, a.cbBtn[cbBtnHide], func() {
+		a.cbDrawChevronDown(dc, a.cbBtn[cbBtnHide])
+	})
+
+	a.cbDrawSeek(dc)
+	a.cbDrawTransport(dc)
+
+	a.cbScale = oldScale
+	a.cbSeekRect, a.cbTimeRect, a.cbVolRect, a.cbBtn = oldSeek, oldTime, oldVol, oldBtn
+
+	cbDownsample(a.cbFinalBits, a.cbBackBits, dw, dh, w, h, int32(ss))
+	pBitBlt.Call(hdc, 0, 0, uintptr(w), uintptr(h), a.cbFinalDC, 0, 0, SRCCOPY)
+	a.cbPaintText(hdc)
+}
+
+// cbPaintText draws all type at the native resolution after the supersampled
+// card and icons have been downsampled. ClearType stays crisp this way.
+func (a *App) cbPaintText(dc uintptr) {
+	s := a.cbScale
+	px := func(v float64) int32 { return int32(math.Round(v * s)) }
+	R := func(x, y, ww, hh float64) RECT {
+		return RECT{Left: px(x), Top: px(y), Right: px(x + ww), Bottom: px(y + hh)}
+	}
 	pSetBkMode.Call(dc, TRANSPARENT)
+
 	pSelectObject.Call(dc, a.cbFontBody)
 	pSetTextColor.Call(dc, cbColText)
 	title := a.cbTitle
@@ -166,23 +268,41 @@ func (a *App) cbPaint(hdc uintptr) {
 	drawText(dc, a.cbHint(), R(50, 31, 300, 17),
 		DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX)
 
-	a.cbDrawTopPill(dc, cbBtnOpen, a.cbBtn[cbBtnOpen], "Open", 0)
-	a.cbDrawTopPill(dc, cbBtnBrowse, a.cbBtn[cbBtnBrowse], "Browse", 1)
-	a.cbDrawIconButton(dc, cbBtnMenu, a.cbBtn[cbBtnMenu], func() {
-		a.cbDrawMenuIcon(dc, a.cbBtn[cbBtnMenu])
-	})
-	a.cbDrawIconButton(dc, cbBtnHide, a.cbBtn[cbBtnHide], func() {
-		a.cbDrawChevronDown(dc, a.cbBtn[cbBtnHide])
-	})
+	pSelectObject.Call(dc, a.cbFontLabel)
+	pSetTextColor.Call(dc, cbColText)
+	for _, pill := range []struct {
+		id   int
+		text string
+		pad  float64
+	}{{cbBtnOpen, "Open", 27}, {cbBtnBrowse, "Browse", 31}} {
+		r := a.cbBtn[pill.id]
+		drawText(dc, pill.text, RECT{
+			Left: r.Left + px(pill.pad), Top: r.Top,
+			Right: r.Right - px(8), Bottom: r.Bottom,
+		}, DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX)
+	}
 
 	a.cbDrawTime(dc)
-	a.cbDrawSeek(dc)
-	a.cbDrawTransport(dc)
 
-	pBitBlt.Call(hdc, 0, 0, uintptr(w), uintptr(h), dc, 0, 0, SRCCOPY)
+	pSelectObject.Call(dc, a.cbFontSmall)
+	for _, item := range []struct {
+		id int
+	}{{cbBtnBack}, {cbBtnFwd}} {
+		r := a.cbBtn[item.id]
+		cx, cy := (r.Left+r.Right)/2, (r.Top+r.Bottom)/2
+		if a.cbEnabled(item.id) {
+			pSetTextColor.Call(dc, cbColText)
+		} else {
+			pSetTextColor.Call(dc, cbColMuted)
+		}
+		drawText(dc, "10", RECT{
+			Left: cx - px(9), Top: cy - px(5),
+			Right: cx + px(9), Bottom: cy + px(6),
+		}, DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX)
+	}
 }
 
-func (a *App) cbDrawTopPill(dc uintptr, id int, r RECT, label string, kind int) {
+func (a *App) cbDrawTopPill(dc uintptr, id int, r RECT, kind int) {
 	s := a.cbScale
 	px := func(v float64) int32 { return int32(math.Round(v * s)) }
 	br := a.cbBrPanel
@@ -205,14 +325,6 @@ func (a *App) cbDrawTopPill(dc uintptr, id int, r RECT, label string, kind int) 
 		a.cbDrawBrowseGlyph(dc, cx, cy, px(7), a.cbPenIcon, a.cbBrIcon)
 	}
 
-	pSelectObject.Call(dc, a.cbFontLabel)
-	pSetTextColor.Call(dc, cbColText)
-	left := r.Left + px(27)
-	if kind == 1 {
-		left = r.Left + px(31)
-	}
-	drawText(dc, label, RECT{Left: left, Top: r.Top, Right: r.Right - px(8), Bottom: r.Bottom},
-		DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX)
 }
 
 func (a *App) cbDrawIconButton(dc uintptr, id int, r RECT, draw func()) {
@@ -420,14 +532,6 @@ func (a *App) cbDrawSkip(dc uintptr, r RECT, dir int, pen, brush uintptr) {
 	pSelectObject.Call(dc, brush)
 	pPolygon.Call(dc, uintptr(unsafe.Pointer(&arrow[0])), 3)
 
-	pSelectObject.Call(dc, a.cbFontSmall)
-	if pen == a.cbPenMuted {
-		pSetTextColor.Call(dc, cbColMuted)
-	} else {
-		pSetTextColor.Call(dc, cbColText)
-	}
-	drawText(dc, "10", RECT{Left: cx - px(9), Top: cy - px(5), Right: cx + px(9), Bottom: cy + px(6)},
-		DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX)
 }
 
 func (a *App) cbDrawVolume(dc uintptr, r RECT, muted bool, pen, brush uintptr) {

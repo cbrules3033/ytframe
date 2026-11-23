@@ -79,10 +79,23 @@ func (a *App) cbEnsureGDI() {
 	if a.cbReady {
 		return
 	}
-	s := a.cbScale
+	// Render the remote at 4x logical resolution when possible and downsample
+	// with HALFTONE. This gives the hand-drawn icons real antialiasing without
+	// a separate vector renderer or image assets.
+	ss := int(math.Ceil(6.0 / math.Max(0.5, a.cbScale)))
+	if ss < 2 {
+		ss = 2
+	}
+	if ss > 6 {
+		ss = 6
+	}
+	a.cbSuper = ss
+	a.cbDrawScale = a.cbScale * float64(ss)
+	fontScale := a.cbScale
+	s := a.cbDrawScale
 	mk := func(px float64, weight int32) uintptr {
 		h, _, _ := pCreateFontW.Call(
-			uintptr(int32(-px*s)), 0, 0, 0, uintptr(weight),
+			uintptr(int32(-px*fontScale)), 0, 0, 0, uintptr(weight),
 			0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY,
 			uintptr(DEFAULT_PITCH|FF_DONTCARE),
 			uintptr(unsafe.Pointer(u16("Segoe UI"))),
@@ -101,7 +114,7 @@ func (a *App) cbEnsureGDI() {
 	}
 	a.cbFontBody = mk(14.5, FW_SEMIBOLD)
 	a.cbFontLabel = mk(11.5, FW_SEMIBOLD)
-	a.cbFontSmall = mk(7.5, FW_SEMIBOLD)
+	a.cbFontSmall = mk(8.5, FW_SEMIBOLD)
 	a.cbFontTime = mk(10.5, FW_NORMAL)
 	a.cbBrBg = mkBrush(cbColBg)
 	a.cbBrPanel = mkBrush(cbColSurface)
@@ -113,9 +126,9 @@ func (a *App) cbEnsureGDI() {
 	a.cbBrIcon = mkBrush(cbColText)
 	a.cbBrMuted = mkBrush(cbColMuted)
 	a.cbBrTrack = mkBrush(cbColTrack)
-	a.cbPenBorder, _, _ = pCreatePen.Call(PS_SOLID, 1, cbColBorder)
-	a.cbPenSurface, _, _ = pCreatePen.Call(PS_SOLID, 1, cbColSurfaceBorder)
-	a.cbPenDivider, _, _ = pCreatePen.Call(PS_SOLID, 1, cbColDivider)
+	a.cbPenBorder = mkPen(1.0, cbColBorder)
+	a.cbPenSurface = mkPen(1.0, cbColSurfaceBorder)
+	a.cbPenDivider = mkPen(1.0, cbColDivider)
 	a.cbPenIcon = mkPen(1.7, cbColText)
 	a.cbPenMuted = mkPen(1.5, cbColMuted)
 	a.cbPenAccent = mkPen(2.0, cbColAccent)
@@ -131,6 +144,17 @@ func (a *App) cbFreeGDI() {
 		pDeleteObject.Call(a.cbBackBmp)
 		a.cbBackBmp = 0
 	}
+	a.cbBackBits = nil
+	if a.cbFinalDC != 0 {
+		pDeleteDC.Call(a.cbFinalDC)
+		a.cbFinalDC = 0
+	}
+	if a.cbFinalBmp != 0 {
+		pDeleteObject.Call(a.cbFinalBmp)
+		a.cbFinalBmp = 0
+	}
+	a.cbFinalBits = nil
+	a.cbBackW, a.cbBackH = 0, 0
 	for _, h := range []uintptr{a.cbFontBody, a.cbFontLabel, a.cbFontSmall, a.cbFontTime,
 		a.cbBrBg, a.cbBrPanel, a.cbBrHover, a.cbBrPress, a.cbBrAccent,
 		a.cbBrAccentHi, a.cbBrAccentLo, a.cbBrIcon, a.cbBrMuted, a.cbBrTrack,
@@ -150,6 +174,35 @@ func maxInt(a, b int) int {
 	return b
 }
 
+func cbLayoutAt(scale float64) (seek, timeRect, vol RECT, btn [cbBtnCount]RECT) {
+	R := func(x, y, ww, hh float64) RECT {
+		return RECT{
+			Left:   int32(math.Round(x * scale)),
+			Top:    int32(math.Round(y * scale)),
+			Right:  int32(math.Round((x + ww) * scale)),
+			Bottom: int32(math.Round((y + hh) * scale)),
+		}
+	}
+
+	// A calm two-row card: title/actions, timeline, then transport.
+	seek = R(18, 74, 604, 5)
+	timeRect = R(368, 46, 252, 18)
+	btn[cbBtnBack] = R(18, 108, 36, 36)
+	btn[cbBtnPlay] = R(62, 96, 58, 58)
+	btn[cbBtnFwd] = R(128, 108, 36, 36)
+	btn[cbBtnVol] = R(184, 108, 36, 36)
+	vol = R(228, 126, 112, 4)
+	btn[cbBtnFullscreen] = R(454, 108, 36, 36)
+	btn[cbBtnEye] = R(498, 108, 36, 36)
+	btn[cbBtnLayouts] = R(542, 108, 36, 36)
+	btn[cbBtnPin] = R(586, 108, 36, 36)
+	btn[cbBtnOpen] = R(368, 13, 74, 30)
+	btn[cbBtnBrowse] = R(450, 13, 92, 30)
+	btn[cbBtnMenu] = R(550, 13, 30, 30)
+	btn[cbBtnHide] = R(588, 13, 30, 30)
+	return
+}
+
 func (a *App) cbLayout() {
 	if a.cbHwnd == 0 {
 		return
@@ -157,34 +210,9 @@ func (a *App) cbLayout() {
 	var rc RECT
 	pGetClientRect.Call(a.cbHwnd, uintptr(unsafe.Pointer(&rc)))
 	w, h := rc.Right, rc.Bottom
-	s := a.cbScale
-	R := func(x, y, ww, hh float64) RECT {
-		return RECT{
-			Left:   int32(math.Round(x * s)),
-			Top:    int32(math.Round(y * s)),
-			Right:  int32(math.Round((x + ww) * s)),
-			Bottom: int32(math.Round((y + hh) * s)),
-		}
-	}
+	a.cbSeekRect, a.cbTimeRect, a.cbVolRect, a.cbBtn = cbLayoutAt(a.cbScale)
 
-	// A calm two-row card: title/actions, timeline, then transport.
-	a.cbSeekRect = R(18, 74, 604, 5)
-	a.cbTimeRect = R(368, 46, 252, 18)
-	a.cbBtn[cbBtnBack] = R(18, 108, 36, 36)
-	a.cbBtn[cbBtnPlay] = R(62, 96, 58, 58)
-	a.cbBtn[cbBtnFwd] = R(128, 108, 36, 36)
-	a.cbBtn[cbBtnVol] = R(184, 108, 36, 36)
-	a.cbVolRect = R(228, 126, 112, 4)
-	a.cbBtn[cbBtnFullscreen] = R(454, 108, 36, 36)
-	a.cbBtn[cbBtnEye] = R(498, 108, 36, 36)
-	a.cbBtn[cbBtnLayouts] = R(542, 108, 36, 36)
-	a.cbBtn[cbBtnPin] = R(586, 108, 36, 36)
-	a.cbBtn[cbBtnOpen] = R(368, 13, 74, 30)
-	a.cbBtn[cbBtnBrowse] = R(450, 13, 92, 30)
-	a.cbBtn[cbBtnMenu] = R(550, 13, 30, 30)
-	a.cbBtn[cbBtnHide] = R(588, 13, 30, 30)
-
-	r := int32(20 * s)
+	r := int32(20 * a.cbScale)
 	rgn, _, _ := pCreateRoundRectRgn.Call(0, 0, uintptr(w+1), uintptr(h+1), uintptr(r*2), uintptr(r*2))
 	if rgn != 0 {
 		pSetWindowRgn.Call(a.cbHwnd, rgn, 1)
