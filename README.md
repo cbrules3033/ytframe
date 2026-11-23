@@ -20,6 +20,8 @@ Paste a link or browse YouTube, click a video, and it plays in a window that is 
 
 **1.4.0:** both windows now start as normal windows, with independent always-on-top toggles. The bar can be resized from its corner grip, with Ctrl+wheel, or from 80–140% presets, and both windows have 100–50% opacity presets for a quieter, stealthier setup.
 
+**1.4.1:** in normal-window mode the control bar gets a taskbar button and Alt+Tab entry, so a buried bar can be brought back without minimizing everything. Pinning the bar returns it to a tool window with no taskbar clutter. The tray menu also has **Bring control bar forward**.
+
 ![The paste bar](docs/bar.png)
 
 ![The floating control bar](docs/controlbar.png)
@@ -89,6 +91,7 @@ The remote is available before playback, so you can always reach **+ Open** and 
 - The eye button cycles **Show always → Hide on pause → Always hidden (audio only)**.
 - The grid button opens the five layout slots.
 - The pin toggles the bar's always-on-top.
+- In normal-window mode the bar has a taskbar button and Alt+Tab entry. Pinning it switches back to a no-taskbar tool window; **Bring control bar forward** in the tray restores a buried bar either way.
 - The overflow menu (⋯) has video modes, a **Window behavior** submenu (both always-on-top toggles, bar size and opacities), layouts, quality, in-video controls, Browse and Hide. **Close YouTube browser** frees the retained browser session when one exists.
 - Drag the small grip in the bottom-right corner to resize the bar, or hold **Ctrl** and use the mouse wheel. **Window behavior → Control bar size** has 80/100/120/140% presets.
 - **Window behavior → Control bar opacity / Video opacity** offers 100/90/80/70/60/50%. The video uses the D3D11 Blt swapchain for window alpha; if your driver ignores it, leave video opacity at 100%.

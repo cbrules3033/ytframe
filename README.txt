@@ -1,4 +1,4 @@
-YTFrame 1.4.0
+YTFrame 1.4.1
 =============
 
 A borderless, video-only YouTube window with a floating control bar and a
@@ -21,7 +21,8 @@ CONTROL BAR
 -----------
 A separate window, usable even when the video is tiny. It starts as a normal
 window; use the pin or Window behavior -> Control bar always on top to keep
-it above other apps. It never steals keyboard focus. The 1.3.4 remote
+it above other apps. In normal-window mode it has a taskbar button and Alt+Tab
+entry. Pinning turns it back into a no-taskbar tool window. The 1.3.4 remote
 has a larger card, a dedicated timeline, a large play button and consistent
 rounded icons. The card and icons are supersampled and filtered down, with
 text drawn at native resolution so both stay crisp.
@@ -33,7 +34,7 @@ text drawn at native resolution so both stay crisp.
   fullscreen
   eye                video mode: show always / hide on pause / always hidden
   grid               layouts
-  pin                control bar always on top
+  pin                control bar always on top (removes its taskbar button)
   Browse             open YouTube
   + Open             paste a new link
   -                  hide the bar
@@ -78,6 +79,9 @@ Tray -> Window behavior, or the remote's overflow menu, has:
   Control bar size               80 / 100 / 120 / 140%
   Control bar opacity            100 / 90 / 80 / 70 / 60 / 50%
   Video opacity                  100 / 90 / 80 / 70 / 60 / 50%
+
+The tray menu also has Bring control bar forward if it is buried behind other
+windows.
 
 Resize the bar by dragging its bottom-right grip, or hold Ctrl and use the
 mouse wheel. Both windows start as normal windows. With topmost off, click a

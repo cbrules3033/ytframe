@@ -60,8 +60,12 @@ func (a *App) createControlBar() {
 
 	w := int32(cbW * a.cbScale)
 	h := int32(cbH * a.cbScale)
+	exStyle := uintptr(WS_EX_APPWINDOW)
+	if a.settings.BarOntop {
+		exStyle = WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE
+	}
 	hwnd, _, _ := pCreateWindowExW.Call(
-		WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,
+		exStyle,
 		uintptr(unsafe.Pointer(u16("YTFrameControls"))),
 		uintptr(unsafe.Pointer(u16("YTFrame controls"))),
 		WS_POPUP,
@@ -76,6 +80,7 @@ func (a *App) createControlBar() {
 	a.cbHover = -1
 	a.cbPress = -1
 	a.cbLayout()
+	a.applyBarWindowStyle()
 	a.applyBarOpacity()
 	logf("control bar created")
 }
@@ -311,6 +316,51 @@ func (a *App) setBarOntop(on bool) {
 			z = ^uintptr(0)
 		}
 		pSetWindowPos.Call(a.cbHwnd, z, 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE)
+		a.applyBarWindowStyle()
+	}
+	a.cbInvalidate()
+}
+
+func (a *App) applyBarWindowStyle() {
+	if a.cbHwnd == 0 {
+		return
+	}
+	style, _, _ := pGetWindowLongPtrW.Call(a.cbHwnd, gwlExStyle)
+	style &^= WS_EX_APPWINDOW | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE
+	if a.settings.BarOntop {
+		style |= WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE
+	} else {
+		style |= WS_EX_APPWINDOW
+	}
+	visible, _, _ := pIsWindowVisible.Call(a.cbHwnd)
+	if visible != 0 {
+		// Taskbar membership is refreshed reliably after a hide/show cycle.
+		pShowWindow.Call(a.cbHwnd, SW_HIDE)
+	}
+	pSetWindowLongPtrW.Call(a.cbHwnd, gwlExStyle, style)
+	pSetWindowPos.Call(a.cbHwnd, 0, 0, 0, 0, 0,
+		SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_FRAMECHANGED)
+	if visible != 0 {
+		pShowWindow.Call(a.cbHwnd, SW_SHOWNOACTIVATE)
+	}
+}
+
+func (a *App) bringControlBarForward() {
+	if a.cbHwnd == 0 {
+		a.showControlBar()
+		return
+	}
+	if !a.cbVisible {
+		a.setControlBarVisible(true)
+	}
+	z := ^uintptr(1) // HWND_NOTOPMOST
+	if a.settings.BarOntop {
+		z = ^uintptr(0)
+	}
+	pSetWindowPos.Call(a.cbHwnd, z, 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE)
+	pShowWindow.Call(a.cbHwnd, SW_SHOW)
+	if !a.settings.BarOntop {
+		pSetForegroundWindow.Call(a.cbHwnd)
 	}
 	a.cbInvalidate()
 }
@@ -507,7 +557,10 @@ func cbWndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 	case WM_ERASEBKGND:
 		return 1
 	case WM_MOUSEACTIVATE:
-		return maNoActivate
+		if a.settings.BarOntop {
+			return maNoActivate
+		}
+		return 1 // MA_ACTIVATE: normal taskbar/Alt+Tab behaviour.
 	case WM_MOUSEMOVE:
 		x, y := mouseX(lparam), mouseY(lparam)
 		if a.cbResizeDrag {

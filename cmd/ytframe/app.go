@@ -581,6 +581,7 @@ func (a *App) showTrayMenu() {
 	}
 
 	add(check(a.settings.BarVisible), 112, "Control bar")
+	add(MF_STRING, 143, "Bring control bar forward")
 	add(check(a.settings.Controls), 115, "In-video controls")
 
 	if lmenu, _, _ := pCreatePopupMenu.Call(); lmenu != 0 {
@@ -692,6 +693,8 @@ func (a *App) onMenuCommand(id int) {
 		a.clearBrowseData()
 	case id == 142:
 		a.closeBrowse()
+	case id == 143:
+		a.bringControlBarForward()
 	case id >= 150 && id <= 153:
 		a.setBarScale([]float64{0.8, 1, 1.2, 1.4}[id-150], true)
 	case id >= 160 && id <= 165:
