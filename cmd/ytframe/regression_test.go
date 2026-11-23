@@ -61,6 +61,41 @@ func TestDuplicateBrowserNavigationDoesNotRestartLoad(t *testing.T) {
 	}
 }
 
+func TestSwitchingVideoKeepsPlayerWindowRect(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	hwnd, _, _ := pCreateWindowExW.Call(
+		0,
+		uintptr(unsafe.Pointer(u16("STATIC"))),
+		uintptr(unsafe.Pointer(u16("YTFrame rect test"))),
+		WS_POPUP|WS_VISIBLE,
+		10, 20, 300, 200,
+		0, 0, getModuleHandle(), 0,
+	)
+	if hwnd == 0 {
+		t.Fatal("could not create a test window")
+	}
+	defer pDestroyWindow.Call(hwnd)
+	p := &Player{id: 7, hwnd: hwnd, running: true, dwidth: 1280, dheight: 720}
+	a := &App{
+		settings:        defaultSettings(),
+		player:          p,
+		switchRect:      RECT{Left: 120, Top: 90, Right: 760, Bottom: 450},
+		switchRectValid: true,
+	}
+	a.placePlayerWindow(7)
+	var rc RECT
+	if ok, _, _ := pGetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&rc))); ok == 0 {
+		t.Fatal("could not read the test window rect")
+	}
+	if rc.Left != 120 || rc.Top != 90 || rectW(rc) != 640 || rectH(rc) != 360 {
+		t.Fatalf("new video moved the window to %d,%d %dx%d", rc.Left, rc.Top, rectW(rc), rectH(rc))
+	}
+	if a.switchRectValid {
+		t.Fatal("the saved switch rect was not consumed")
+	}
+}
+
 func TestPlayerRestartsUseDifferentPipes(t *testing.T) {
 	if (&Player{id: 1}).pipeName() == (&Player{id: 2}).pipeName() {
 		t.Fatal("restarted player can connect to the old player's pipe")

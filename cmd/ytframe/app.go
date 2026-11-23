@@ -62,6 +62,8 @@ type App struct {
 	lastStartKey      string
 	lastStartAt       time.Time
 	playRequestedAt   time.Time
+	switchRect        RECT
+	switchRectValid   bool
 	lastTrayTitle     string
 
 	status    string
@@ -338,6 +340,7 @@ var helperProcCB = syscall.NewCallback(func(hwnd, msg, wparam, lparam uintptr) u
 		return 0
 	case WM_APP_WINDOWFOUND:
 		a.placePlayerWindow(int(wparam))
+		a.applyVideoVisibility()
 		return 0
 	case WM_APP_SNAP:
 		pSetTimer.Call(helperHwnd, TIMER_SNAP, 150, 0)
@@ -865,6 +868,25 @@ func (a *App) startPlayback(raw string, showBarIfError bool) {
 		}
 	}
 	a.lastStartKey, a.lastStartAt = key, time.Now()
+	// Remember where the current picture is before replacing it. mpv can
+	// recreate or resize its window for a new stream, and on a multi-monitor
+	// desktop that used to leave the new video on whichever monitor Windows
+	// chose. This rect is restored once the new window exists.
+	a.captureRect()
+	a.switchRectValid = a.settings.HasRect && a.settings.Width >= 100 && a.settings.Height >= 60
+	if p := a.player; p != nil {
+		if st := p.snapshot(); st.Fullscreen {
+			a.switchRectValid = false
+		}
+	}
+	if a.switchRectValid {
+		a.switchRect = RECT{
+			Left: a.settings.X, Top: a.settings.Y,
+			Right:  a.settings.X + a.settings.Width,
+			Bottom: a.settings.Y + a.settings.Height,
+		}
+		logf("keeping video window at %d,%d %dx%d", a.settings.X, a.settings.Y, a.settings.Width, a.settings.Height)
+	}
 	a.saveCurrentPos()
 	start := a.resumeFor(u, ts)
 	a.loading, a.loadRestarted = true, false
@@ -879,9 +901,13 @@ func (a *App) startPlayback(raw string, showBarIfError bool) {
 	pKillTimer.Call(helperHwnd, TIMER_RETRY)
 	pSetTimer.Call(helperHwnd, TIMER_LOADWAIT, 30000, 0)
 	if a.player != nil && a.player.isRunning() && a.player.resolver != resolverPath() {
+		logf("resolver changed; restarting player")
 		old := a.player
 		a.player = nil
 		old.killAsync()
+	}
+	if a.player != nil && a.player.isRunning() {
+		logf("reusing player %d for the next video", a.player.id)
 	}
 	if a.player == nil || !a.player.isRunning() {
 		if err := a.startPlayer(u, start); err != nil {
@@ -969,6 +995,9 @@ func (a *App) handleLoaded(id int) {
 		a.lastSkipEnd = 0
 		a.refreshTrayTitle()
 		a.trackPosition()
+		if st := p.snapshot(); !st.Fullscreen && !a.pendingFullscreen {
+			a.placePlayerWindow(p.id)
+		}
 		if a.settings.BarVisible && !a.browseOpen {
 			a.showControlBar()
 		}
@@ -1138,7 +1167,8 @@ func (a *App) captureRect() {
 		return
 	}
 	hwnd := p.hwndNow()
-	if hwnd == 0 {
+	if !windowAlive(hwnd) {
+		p.forgetWindow()
 		return
 	}
 	st := p.snapshot()
@@ -1168,25 +1198,39 @@ func (a *App) placePlayerWindow(id int) {
 		return
 	}
 	hwnd := p.hwndNow()
-	if hwnd == 0 {
+	if !windowAlive(hwnd) {
+		// mpv may have recreated its window for the new stream. Find the new
+		// HWND; WM_APP_WINDOWFOUND will run this placement again.
+		p.forgetWindow()
+		p.discoverWindow()
 		return
 	}
 	w, h := a.settings.Width, a.settings.Height
-	if w < 100 {
-		w = 960
-	}
-	if h < 60 {
-		h = 540
-	}
 	var x, y int32
-	if a.settings.HasRect {
+	if a.switchRectValid {
+		x, y = a.switchRect.Left, a.switchRect.Top
+		w, h = rectW(a.switchRect), rectH(a.switchRect)
+		logf("restoring video window to %d,%d %dx%d", x, y, w, h)
+	} else if a.settings.HasRect {
 		x, y = a.settings.X, a.settings.Y
 	} else {
+		if w < 100 {
+			w = 960
+		}
+		if h < 60 {
+			h = 540
+		}
 		var pt POINT
 		pGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
 		work := workAreaForPoint(pt)
 		x = work.Left + (rectW(work)-w)/2
 		y = work.Top + (rectH(work)-h)/2
+	}
+	if w < 100 {
+		w = 960
+	}
+	if h < 60 {
+		h = 540
 	}
 	work := workAreaAt(x+w/2, y+h/2)
 	if w > rectW(work) {
@@ -1201,6 +1245,7 @@ func (a *App) placePlayerWindow(id int) {
 		SWP_NOZORDER|SWP_NOACTIVATE)
 	a.settings.X, a.settings.Y, a.settings.Width, a.settings.Height = x, y, w, h
 	a.settings.HasRect = true
+	a.switchRectValid = false
 }
 
 func (a *App) snapAspect() {
@@ -1210,7 +1255,11 @@ func (a *App) snapAspect() {
 	}
 	st := p.snapshot()
 	hwnd := p.hwndNow()
-	if hwnd == 0 || st.Fullscreen || st.Dwidth <= 0 || st.Dheight <= 0 {
+	if !windowAlive(hwnd) {
+		p.forgetWindow()
+		return
+	}
+	if st.Fullscreen || st.Dwidth <= 0 || st.Dheight <= 0 {
 		return
 	}
 	var rc RECT

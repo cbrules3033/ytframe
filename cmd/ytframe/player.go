@@ -580,6 +580,12 @@ func (p *Player) hwndNow() uintptr {
 	return p.hwnd
 }
 
+func (p *Player) forgetWindow() {
+	p.mu.Lock()
+	p.hwnd = 0
+	p.mu.Unlock()
+}
+
 func (p *Player) killAsync() {
 	p.mu.Lock()
 	cmd := p.cmd

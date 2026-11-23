@@ -554,6 +554,14 @@ func pointIn(r RECT, x, y int32) bool {
 	return x >= r.Left && x < r.Right && y >= r.Top && y < r.Bottom
 }
 
+func windowAlive(hwnd uintptr) bool {
+	if hwnd == 0 {
+		return false
+	}
+	ok, _, _ := pIsWindow.Call(hwnd)
+	return ok != 0
+}
+
 func getWindowText(hwnd uintptr) string {
 	n, _, _ := pGetWindowTextLengthW.Call(hwnd)
 	if n == 0 {

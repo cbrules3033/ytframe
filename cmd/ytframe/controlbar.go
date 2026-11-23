@@ -1101,7 +1101,8 @@ func (a *App) applyVideoVisibility() {
 		return
 	}
 	hwnd := p.hwndNow()
-	if hwnd == 0 {
+	if !windowAlive(hwnd) {
+		p.forgetWindow()
 		return
 	}
 	st := p.snapshot()
@@ -1156,7 +1157,8 @@ func (a *App) showVideoWindow() {
 		return
 	}
 	hwnd := p.hwndNow()
-	if hwnd == 0 {
+	if !windowAlive(hwnd) {
+		p.forgetWindow()
 		return
 	}
 	pSetWindowPos.Call(hwnd, 0, 0, 0, 0, 0,
@@ -1227,6 +1229,8 @@ func (a *App) applyLayout(i int) {
 	if i < 0 || i >= layoutSlots {
 		return
 	}
+	// An explicit layout choice wins over the rect saved for the next video.
+	a.switchRectValid = false
 	l := a.settings.Layouts[i]
 	if !l.Used {
 		a.setBarStatus(fmt.Sprintf("Layout %d is empty", i+1))

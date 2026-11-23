@@ -1,4 +1,4 @@
-YTFrame 1.3.1
+YTFrame 1.3.2
 =============
 
 A borderless, video-only YouTube window with a floating control bar and a
@@ -61,6 +61,10 @@ Bar grid button         same menu
 One slot can be the default; it is applied at startup / when the first video
 opens. Applying a layout while playing honors the saved width and top-left
 and recomputes the height for the current video aspect.
+
+Switching to another video reuses the same player window and keeps it on the
+same monitor, instead of reopening on the monitor where the browser or mouse
+is.
 
 YOUTUBE BROWSER
 ---------------

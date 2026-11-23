@@ -10,6 +10,8 @@ Paste a link or browse YouTube, click a video, and it plays in a window that is 
 
 **1.3.1 fixes:** closing the browser window keeps the loaded YouTube session for instant reopening; YouTube's duplicate navigation event no longer restarts a click that is already loading; and the remote's play button now resumes and reveals the hidden picture reliably.
 
+**1.3.2 fix:** switching videos keeps the same player window at the same position, including on multi-monitor desktops. The window is not recreated or moved to the monitor where the browser or mouse happens to be.
+
 ![The paste bar](docs/bar.png)
 
 ![The floating control bar](docs/controlbar.png)
